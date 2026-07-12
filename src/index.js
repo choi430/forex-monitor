@@ -44,8 +44,18 @@ export default {
       if (!state) {
         return Response.json({ error: 'no data yet' }, { status: 503 });
       }
+      const config = await loadConfig(env.FOREX_KV);
       return Response.json(
-        { latest: state.latest, daily: state.daily, chart: state.chart },
+        {
+          latest:     state.latest,
+          daily:      state.daily,
+          chart:      state.chart,
+          thresholds: {
+            high: config.threshold_high,
+            low:  config.threshold_low,
+          },
+          us_session_start: config.us_session_start ?? 20,
+        },
         { headers: { 'Cache-Control': 'no-store' } },
       );
     }

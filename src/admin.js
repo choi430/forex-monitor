@@ -103,6 +103,11 @@ export function getAdminHtml() {
            <div class="hint">触及高低点后多久可再次推送，默认 30</div></div>
       <input type="number" id="cooldown_3" step="5" min="0">
     </div>
+    <div class="row">
+      <div><div class="label">美股时段起始（CST 小时）</div>
+          <div class="hint">此时间后 KOSPI 排到最后，默认 20（即 20:00）</div></div>
+      <input type="number" id="us_session_start" step="1" min="0" max="23">
+    </div>
   </div>
 
   <h3>绝对阈值（条件4）</h3>
@@ -206,6 +211,7 @@ function fillForm(cfg) {
   chk('notify_2',   cfg.notify_2);
   chk('notify_3',   cfg.notify_3);
   chk('notify_4',   cfg.notify_4);
+  num('us_session_start', cfg.us_session_start ?? 20);
 }
 
 function readForm() {
@@ -229,6 +235,7 @@ function readForm() {
     notify_2:   chk('notify_2'),
     notify_3:   chk('notify_3'),
     notify_4:   chk('notify_4'),
+    us_session_start: num('us_session_start'),
   };
 }
 

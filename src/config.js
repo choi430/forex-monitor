@@ -32,6 +32,8 @@ export const DEFAULT_CONFIG = {
   notify_2:   true,  // anomaly detection
   notify_3:   true,  // daily high/low touch
   notify_4:   true,  // absolute threshold
+
+  us_session_start: 20,  // 美股时段起始小时（CST），之后 KOSPI 排到最后
 };
 
 // ─── Time Segments ──────────────────────────────────────────────────────────

@@ -105,6 +105,10 @@ export function evaluateRules(state, config, fetchResult, nowTs, segment = 'UNKN
           threshold: (Math.abs(mean) + config.n_value * std).toFixed(4),
         },
       });
+      // 记录异动点，最多保留50个
+      if (!daily.anomaly_points) daily.anomaly_points = [];
+      daily.anomaly_points.push({ ts: nowTs, rate: usdkrw, dir: changeRatePerMin > 0 ? 'up' : 'down' });
+      if (daily.anomaly_points.length > 50) daily.anomaly_points.splice(0, daily.anomaly_points.length - 50);
     }
   }
 
@@ -141,6 +145,7 @@ export function evaluateRules(state, config, fetchResult, nowTs, segment = 'UNKN
         reason: `突破高位阈值 ${config.threshold_high}`,
       });
       daily.th_high_triggered = true;
+      daily.th_high_ts = nowTs;
     }
 
     if (
@@ -153,6 +158,7 @@ export function evaluateRules(state, config, fetchResult, nowTs, segment = 'UNKN
         reason: `跌破低位阈值 ${config.threshold_low}`,
       });
       daily.th_low_triggered = true;
+      daily.th_low_ts = nowTs;
     }
   }
 
