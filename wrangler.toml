@@ -1,0 +1,23 @@
+name = "forex-monitor"
+main = "src/index.js"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+# Cron: fires every minute, time-segment logic is handled inside the Worker
+[triggers]
+crons = ["* * * * *"]
+
+# KV namespace — replace the id values after running:
+# wrangler kv namespace create FOREX_KV
+# wrangler kv namespace create FOREX_KV --preview
+[[kv_namespaces]]
+binding  = "FOREX_KV"
+id       = "f9f391bf1c124ad8a46585aabbad6908"
+preview_id = "f085a7c21b3441e6b38dc823cf7c987b"
+
+# Secrets (set via: wrangler secret put SECRET_NAME)
+# TWELVE_DATA_KEY       — Twelve Data API key
+# FEISHU_APP_ID         — 飞书自建应用 App ID
+# FEISHU_APP_SECRET     — 飞书自建应用 App Secret
+# FEISHU_CHAT_ID        — 机器人所在群的 Chat ID
+# FEISHU_VERIFY_TOKEN   — 飞书事件订阅验证 Token
