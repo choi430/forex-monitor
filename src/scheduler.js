@@ -1,5 +1,5 @@
 import { TIME_SEGMENTS, toCSTMinutes, tradingDate } from './config.js';
-import { loadState, saveState, loadConfig, ensureDailyReset, pushChartPoint } from './kv.js';
+import { loadState, saveState, loadConfig, ensureDailyReset, pushChartPoint, saveHistory } from './kv.js';
 import { fetchAllData } from './fetcher.js';
 import { evaluateRules } from './rules.js';
 import {
@@ -50,6 +50,7 @@ export async function handleCron(env) {
     const cstMin = toCSTMinutes(nowTs);
     if (cstMin === 4 * 60) { // 04:00 CST
       await sendClosingSummary(env, nowTs);
+      await archiveDay(env, nowTs);
     }
     return;
   }
@@ -236,5 +237,32 @@ async function sendClosingSummary(env, nowTs) {
     await sendCard(env, card);
   } catch (e) {
     console.error('[forex-monitor] closing summary failed:', e);
+  }
+}
+
+// ─── Archive Day ──────────────────────────────────────────────────────────────
+
+async function archiveDay(env, nowTs) {
+  try {
+    const state  = await loadState(env.FOREX_KV);
+    if (!state?.chart?.length) return;
+
+    const config = await loadConfig(env.FOREX_KV);
+    // At 04:00, tradingDate still points to "today's" session
+    const date   = tradingDate(nowTs - 60_000);
+
+    await saveHistory(env.FOREX_KV, date, {
+      date,
+      chart:    state.chart,
+      daily:    state.daily,
+      latest:   state.latest,   // includes prev-close values for accurate % display
+      thresholds: {
+        high: config.threshold_high,
+        low:  config.threshold_low,
+      },
+    });
+    console.log('[forex-monitor] archived day:', date);
+  } catch (e) {
+    console.error('[forex-monitor] archiveDay failed:', e);
   }
 }

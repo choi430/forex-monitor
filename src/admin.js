@@ -255,7 +255,7 @@ async function save() {
     const res = await fetch('/api/config', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json', 'X-Admin-Token': TOKEN },
-      body:    JSON.stringify(readForm()),
+      body: JSON.stringify(form),
     });
     if (res.status === 403) {
       msg.textContent = '认证失败，请刷新页面重新登录';

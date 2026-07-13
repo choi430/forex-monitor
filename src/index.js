@@ -1,7 +1,7 @@
 import { getAdminHtml } from './admin.js';
 import { handleCron }         from './scheduler.js';
 import { handleCommand, sendCard } from './feishu.js';
-import { loadState, loadConfig, saveConfig }   from './kv.js';
+import { loadState, loadConfig, saveConfig, loadHistory, listHistoryDates } from './kv.js';
 import { getPWAHtml }              from './pwa.js';
 
 export default {
@@ -91,6 +91,21 @@ export default {
       return Response.json({ ok: true });
     }
     
+    // ── History: list available dates ─────────────────────────────────────────
+    if (pathname === '/api/history/dates') {
+      const dates = await listHistoryDates(env.FOREX_KV);
+      return Response.json(dates, { headers: { 'Cache-Control': 'no-store' } });
+    }
+
+    // ── History: get one day's data ───────────────────────────────────────────
+    if (pathname === '/api/history') {
+      const date = url.searchParams.get('date');
+      if (!date) return Response.json({ error: 'date required' }, { status: 400 });
+      const data = await loadHistory(env.FOREX_KV, date);
+      if (!data) return Response.json({ error: 'not found' }, { status: 404 });
+      return Response.json(data, { headers: { 'Cache-Control': 'no-store' } });
+    }
+
     return new Response('Not Found', { status: 404 });
   },
 };

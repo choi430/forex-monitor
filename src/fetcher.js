@@ -84,7 +84,11 @@ export async function fetchAllData(env, cached) {
 
   const indices = {};
   for (const { key, symbol } of indexDefs) {
-    const fallback = cached?.[key] ?? null;
+    const fallback = cached ? {
+      price:         cached[`${key}_price`] ?? null,
+      prevClose:     cached[`${key}_prev`]  ?? null,
+      changePercent: null,
+    } : null;
     try {
       indices[key] = await fetchYahooIndex(symbol);
     } catch (e) {

@@ -67,12 +67,15 @@ export function evaluateRules(state, config, fetchResult, nowTs, segment = 'UNKN
     if (currentSlot > lastSlot) {
       const segmentLabel = { HIGH: '高频时段', MID: '中频时段', LOW: '低频时段' }[segment] ?? segment;
       const lastSegLabel = lastTs > 0
-        ? ({ HIGH: '高频时段', MID: '中频时段', LOW: '低频时段' }[toCSTMinutes(lastTs) < 450 ? 'HIGH'
-            : toCSTMinutes(lastTs) < 810 ? 'MID'
-            : toCSTMinutes(lastTs) < 930 ? 'HIGH'
-            : toCSTMinutes(lastTs) < 1200 ? 'LOW'
-            : toCSTMinutes(lastTs) < 1350 ? 'HIGH'
-            : toCSTMinutes(lastTs) < 1470 ? 'MID' : 'LOW'] ?? segmentLabel)
+        ? ({ HIGH: '高频时段', MID: '中频时段', LOW: '低频时段' }[
+            lastCstMin < 450  ? 'MID'
+            : lastCstMin < 540  ? 'HIGH'
+            : lastCstMin < 810  ? 'MID'
+            : lastCstMin < 930  ? 'HIGH'
+            : lastCstMin < 1200 ? 'LOW'
+            : lastCstMin < 1350 ? 'HIGH'
+            : lastCstMin < 1470 ? 'MID' : 'LOW'
+          ] ?? segmentLabel)
         : segmentLabel;
 
       const label = lastSegLabel === segmentLabel

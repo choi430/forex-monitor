@@ -119,3 +119,28 @@ export async function saveFeishuToken(kv, token, expiresIn) {
     expires_at: Date.now() + (expiresIn - 300) * 1000, // 5-min safety buffer
   }));
 }
+
+// ─── History (31-day rolling archive) ────────────────────────────────────────
+
+const TTL_31_DAYS = 31 * 24 * 3600; // seconds
+
+/** Archive one trading day. key: history:YYYY-MM-DD, TTL 31 days */
+export async function saveHistory(kv, date, data) {
+  await kv.put(`history:${date}`, JSON.stringify(data), {
+    expirationTtl: TTL_31_DAYS,
+  });
+}
+
+/** Load one day's archive. Returns null if not found. */
+export async function loadHistory(kv, date) {
+  return (await kv.get(`history:${date}`, 'json')) ?? null;
+}
+
+/** List all available history dates, newest first. */
+export async function listHistoryDates(kv) {
+  const result = await kv.list({ prefix: 'history:' });
+  return result.keys
+    .map(k => k.name.replace('history:', ''))
+    .sort()
+    .reverse();
+}

@@ -221,12 +221,14 @@ const PARAM_MAP = {
   interval_high:     'interval_high',
   interval_mid:      'interval_mid',
   interval_low:      'interval_low',
+  us_session_start:  'us_session_start',
 };
 
 const NUMERIC_PARAMS = new Set([
   'n_value', 'rolling_window', 'broadcast_interval',
   'cooldown_3', 'threshold_high', 'threshold_low',
   'interval_high', 'interval_mid', 'interval_low',
+  'us_session_start',
 ]);
 
 const CONDITION_FLAGS = {
