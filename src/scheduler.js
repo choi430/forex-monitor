@@ -1,4 +1,4 @@
-import { TIME_SEGMENTS, toCSTMinutes, tradingDate } from './config.js';
+import { TIME_SEGMENTS, toCSTMinutes, tradingDate, isUSDST, fmtPrice, fmtChg, cstTimeStr } from './config.js';
 import { loadState, saveState, loadConfig, ensureDailyReset, pushChartPoint, saveHistory } from './kv.js';
 import { fetchAllData } from './fetcher.js';
 import { evaluateRules } from './rules.js';
@@ -7,19 +7,31 @@ import {
   buildAlertCard,
   buildErrorCard,
 } from './feishu.js';
-import { fmtPrice, fmtChg, cstTimeStr } from './config.js';
 
 // ─── Time Segment Detection ───────────────────────────────────────────────────
 
 /**
  * Returns 'HIGH' | 'MID' | 'LOW' | 'INACTIVE' for a given timestamp.
  */
+function isInTradingWindow(ts) {
+  const isDST   = isUSDST(ts);
+  const openMin = isDST ? 300 : 360; // 05:00 或 06:00 CST（分钟数）
+  const d       = new Date(ts + 8 * 3600_000);
+  const dow     = d.getUTCDay(); // 0=周日, 6=周六
+  const cstMin  = d.getUTCHours() * 60 + d.getUTCMinutes();
+  if (dow === 0) return false;                      // 周日
+  if (dow === 6 && cstMin >= openMin) return false; // 周六收盘后
+  if (dow === 1 && cstMin < openMin) return false;  // 周一开盘前
+  return true;
+}
+
 function getSegment(ts) {
+  if (!isInTradingWindow(ts)) return 'INACTIVE';
   const mins = toCSTMinutes(ts);
   for (const seg of TIME_SEGMENTS) {
     if (mins >= seg.start && mins < seg.end) return seg.type;
   }
-  return 'INACTIVE';
+  return 'LOW';
 }
 
 /**
@@ -45,15 +57,24 @@ export async function handleCron(env) {
   const nowTs   = Date.now();
   const segment = getSegment(nowTs);
 
-  // Outside forex window → only send closing summary at exactly 04:00 CST
-  if (segment === 'INACTIVE') {
-    const cstMin = toCSTMinutes(nowTs);
-    if (cstMin === 4 * 60) { // 04:00 CST
-      await sendClosingSummary(env, nowTs);
-      await archiveDay(env, nowTs);
+// ── 每日交易日边界：归档前一日数据（先于状态重置）────────────────────────
+  const _d          = new Date(nowTs + 8 * 3600_000);
+  const _cstMin     = _d.getUTCHours() * 60 + _d.getUTCMinutes();
+  const _marketOpen = isUSDST(nowTs) ? 300 : 360; // 05:00 或 06:00 CST
+
+  if (_cstMin === _marketOpen) {
+    const prevState = await loadState(env.FOREX_KV);
+    if (prevState?.chart?.length) {
+      const expectedDate = tradingDate(nowTs - 60_000);
+      if (prevState.daily.trade_date === expectedDate) {  // ← 加这行
+        const prevConfig = await loadConfig(env.FOREX_KV);
+        await sendClosingSummary(env, nowTs, prevState);
+        await archiveDay(env, nowTs, prevState, prevConfig);
+      }
     }
-    return;
   }
+
+  if (segment === 'INACTIVE') return;
 
   // Load config first to check fetch interval
   const config = await loadConfig(env.FOREX_KV);
@@ -157,11 +178,11 @@ function buildLatest(f) {
   };
 }
 
-async function sendClosingSummary(env, nowTs) {
-  const state = await loadState(env.FOREX_KV);
+async function sendClosingSummary(env, nowTs, state = null) {
+  if (!state) state = await loadState(env.FOREX_KV);
   if (!state?.latest || !state?.daily) return;
-
   const { latest, daily } = state;
+
   const usdkrwChg = latest.usdkrw_prev
     ? ((latest.usdkrw - latest.usdkrw_prev) / latest.usdkrw_prev) * 100
     : null;
@@ -242,12 +263,12 @@ async function sendClosingSummary(env, nowTs) {
 
 // ─── Archive Day ──────────────────────────────────────────────────────────────
 
-async function archiveDay(env, nowTs) {
+async function archiveDay(env, nowTs, state = null, config = null) {
   try {
-    const state  = await loadState(env.FOREX_KV);
+    if (!state) state = await loadState(env.FOREX_KV);
     if (!state?.chart?.length) return;
+    if (!config) config = await loadConfig(env.FOREX_KV);
 
-    const config = await loadConfig(env.FOREX_KV);
     // At 04:00, tradingDate still points to "today's" session
     const date   = tradingDate(nowTs - 60_000);
 

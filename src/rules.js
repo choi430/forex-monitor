@@ -48,33 +48,38 @@ export function evaluateRules(state, config, fetchResult, nowTs, segment = 'UNKN
     config.rolling_window,
   );
 
-  // ── Condition 1: Regular Broadcast (clock-aligned) ────────────────────────
+  // ── Condition 1: Regular Broadcast (24h clock-aligned from market open) ───
   if (config.notify_1) {
-    const FOREX_START_MIN = 420; // 07:00 CST
-    const cstMin     = toCSTMinutes(nowTs);
-    const interval   = config.broadcast_interval;
+    const MARKET_OPEN = 300; // 05:00 CST（夏令时开盘，冬令时开盘前INACTIVE故不影响）
+    const interval    = config.broadcast_interval;
 
-    // Which broadcast slot are we currently in?
-    const currentSlot = Math.floor((cstMin - FOREX_START_MIN) / interval);
+    // 使用普通CST分钟（非extended），对24h窗口做模运算连续编号
+    const _d          = new Date(nowTs + 8 * 3600_000);
+    const cstMinNow   = _d.getUTCHours() * 60 + _d.getUTCMinutes();
+    const tradingNow  = (cstMinNow - MARKET_OPEN + 1440) % 1440;
+    const currentSlot = Math.floor(tradingNow / interval);
 
-    // Which slot did the last broadcast belong to?
-    const lastTs    = daily.last_broadcast_ts ?? 0;
-    const lastCstMin = lastTs > 0 ? toCSTMinutes(lastTs) : -9999;
-    const lastSlot  = lastTs > 0
-      ? Math.floor((lastCstMin - FOREX_START_MIN) / interval)
-      : -1;
+    const lastTs = daily.last_broadcast_ts ?? 0;
+    let lastSlot = -1;
+    if (lastTs > 0) {
+      const _dl        = new Date(lastTs + 8 * 3600_000);
+      const cstMinLast = _dl.getUTCHours() * 60 + _dl.getUTCMinutes();
+      lastSlot = Math.floor(((cstMinLast - MARKET_OPEN + 1440) % 1440) / interval);
+    }
 
     if (currentSlot > lastSlot) {
       const segmentLabel = { HIGH: '高频时段', MID: '中频时段', LOW: '低频时段' }[segment] ?? segment;
-      const lastSegLabel = lastTs > 0
+      const lastCstMinExt = lastTs > 0 ? toCSTMinutes(lastTs) : -9999;
+      const lastSegLabel  = lastTs > 0
         ? ({ HIGH: '高频时段', MID: '中频时段', LOW: '低频时段' }[
-            lastCstMin < 450  ? 'MID'
-            : lastCstMin < 540  ? 'HIGH'
-            : lastCstMin < 810  ? 'MID'
-            : lastCstMin < 930  ? 'HIGH'
-            : lastCstMin < 1200 ? 'LOW'
-            : lastCstMin < 1350 ? 'HIGH'
-            : lastCstMin < 1470 ? 'MID' : 'LOW'
+            lastCstMinExt < 420  ? 'LOW'
+            : lastCstMinExt < 450  ? 'MID'
+            : lastCstMinExt < 540  ? 'HIGH'
+            : lastCstMinExt < 810  ? 'MID'
+            : lastCstMinExt < 930  ? 'HIGH'
+            : lastCstMinExt < 1200 ? 'LOW'
+            : lastCstMinExt < 1350 ? 'HIGH'
+            : lastCstMinExt < 1470 ? 'MID' : 'LOW'
           ] ?? segmentLabel)
         : segmentLabel;
 
@@ -88,8 +93,8 @@ export function evaluateRules(state, config, fetchResult, nowTs, segment = 'UNKN
   }
 
   // ── Condition 2: Anomaly Detection (no cooldown) ─────────────────────────
-  if (config.notify_2 && anomalyBuf.length >= 10) {
-    const rates = anomalyBuf.map(p => Math.abs(p.cr));  // 取绝对值
+  if (config.notify_2 && state.anomaly_buf.length >= 10) {
+    const rates = state.anomaly_buf.map(p => Math.abs(p.cr));
     const mean  = rates.reduce((a, b) => a + b, 0) / rates.length;
     const std   = Math.sqrt(
       rates.reduce((a, b) => a + (b - mean) ** 2, 0) / rates.length,
@@ -109,7 +114,7 @@ export function evaluateRules(state, config, fetchResult, nowTs, segment = 'UNKN
         },
       });
       // 记录异动点，最多保留50个
-      if (!daily.anomaly_points) daily.anomaly_points = [];
+      daily.anomaly_points = [...(daily.anomaly_points ?? [])];
       daily.anomaly_points.push({ ts: nowTs, rate: usdkrw, dir: changeRatePerMin > 0 ? 'up' : 'down' });
       if (daily.anomaly_points.length > 50) daily.anomaly_points.splice(0, daily.anomaly_points.length - 50);
     }

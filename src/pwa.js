@@ -142,7 +142,7 @@ export function getPWAHtml() {
     </div>
     <span id="range-high">—</span>
   </div>
-  <div class="chart-wrap" style="height:100px">
+  <div class="chart-wrap" style="height:240px">
     <canvas id="main-chart" role="img" aria-label="USD/KRW日内走势"></canvas>
     <div class="tooltip-box" id="tt">
       <div class="tt-time" id="tt-time">—</div>
@@ -163,7 +163,7 @@ export function getPWAHtml() {
       </div>
       <div class="idx-hl" id="kospi-hl">—</div>
     </div>
-    <div class="chart-wrap" style="height:120px">
+    <div class="chart-wrap" style="height:240px">
       <canvas id="c-kospi" role="img" aria-label="KOSPI走势"></canvas>
       <div class="tooltip-box" id="tt-kospi">
         <div class="tt-time" id="tt-kospi-time">—</div>
@@ -181,7 +181,7 @@ export function getPWAHtml() {
       </div>
       <div class="idx-hl" id="nasdaq-hl">—</div>
     </div>
-    <div class="chart-wrap" style="height:120px">
+    <div class="chart-wrap" style="height:240px">
       <canvas id="c-nasdaq" role="img" aria-label="NASDAQ走势"></canvas>
       <div class="tooltip-box" id="tt-nasdaq">
         <div class="tt-time" id="tt-nasdaq-time">—</div>
@@ -199,7 +199,7 @@ export function getPWAHtml() {
       </div>
       <div class="idx-hl" id="sp500-hl">—</div>
     </div>
-    <div class="chart-wrap" style="height:120px">
+    <div class="chart-wrap" style="height:240px">
       <canvas id="c-sp500" role="img" aria-label="S&P 500走势"></canvas>
       <div class="tooltip-box" id="tt-sp500">
         <div class="tt-time" id="tt-sp500-time">—</div>
@@ -230,17 +230,87 @@ function cstLabel(ts) {
        + ':' + String(d.getUTCMinutes()).padStart(2,'0');
 }
 
+function isUSDSTBrowser(refTs = Date.now()) {
+  const d    = new Date(refTs);
+  const year = d.getUTCFullYear();
+  const mar1 = new Date(Date.UTC(year, 2, 1));
+  const dstS = new Date(Date.UTC(year, 2, 1 + (7 - mar1.getUTCDay()) % 7 + 7, 7));
+  const nov1 = new Date(Date.UTC(year, 10, 1));
+  const dstE = new Date(Date.UTC(year, 10, 1 + (7 - nov1.getUTCDay()) % 7, 6));
+  return refTs >= dstS.getTime() && refTs < dstE.getTime();
+}
+
+// 指定日期（refTs 所在的 CST 日历日）的开盘时间戳（夏令时 5:00 CST / 冬令时 6:00 CST）。
+// refTs 默认取当前时间，但查看历史数据时必须传入该天的实际时间戳，
+// 否则历史数据全部早于"今天"的开盘时间，会被 x 轴 min 裁掉导致折线消失。
+function marketOpenTs(refTs = Date.now()) {
+  const isDST    = isUSDSTBrowser(refTs);
+  const openMin  = isDST ? 300 : 360; // 分钟数：5:00 或 6:00
+  const cstRef   = new Date(refTs + 8 * 3600_000);
+  const y = cstRef.getUTCFullYear(), m = cstRef.getUTCMonth(), d = cstRef.getUTCDate();
+  const midnightCstInUtcMs = Date.UTC(y, m, d) - 8 * 3600_000; // 当天 00:00 CST 对应的 UTC 时间戳
+  return midnightCstInUtcMs + openMin * 60_000;
+}
+
+function getMarketSessionTs(key, refTs) {
+  const isDST  = isUSDSTBrowser(refTs);
+  const cstRef = new Date(refTs + 8 * 3600_000);
+  const y = cstRef.getUTCFullYear(), mo = cstRef.getUTCMonth(), d = cstRef.getUTCDate();
+  const midUtc = Date.UTC(y, mo, d) - 8 * 3600_000; // 当天 00:00 CST 对应的 UTC 时间戳
+
+  if (key === 'kospi') {
+    return {
+      open:  midUtc + 8    * 3600_000,  // 08:00 CST
+      close: midUtc + 14.5 * 3600_000,  // 14:30 CST
+    };
+  }
+  // NASDAQ / S&P 500
+  const openH  = isDST ? 21.5 : 22.5;  // EDT 21:30 / EST 22:30 CST
+  const closeH = isDST ? 28   : 29;    // EDT 04:00 次日 / EST 05:00 次日 CST
+  return {
+    open:  midUtc + openH  * 3600_000,
+    close: midUtc + closeH * 3600_000,
+  };
+}
+
+// 参考线右端点：如果最后一条数据就是"今天"（实时数据），延伸到当前时间；
+// 如果是历史数据（最后一条数据不是今天），就用当天最后一条数据的时间作为右边界，
+// 不能再用 Date.now()，否则历史图表的参考线会跑到真实的"今天"去。
+function chartRightBound(sorted) {
+  const last = sorted[sorted.length - 1]?.ts;
+  if (last == null) return Date.now();
+  const now = Date.now();
+  const sameDay = new Date(last + 8 * 3600_000).toDateString()
+                === new Date(now  + 8 * 3600_000).toDateString();
+  return sameDay ? Math.max(last, now) : last;
+}
+
 function currentSegment() {
-  const now  = new Date();
-  const cstM = ((now.getUTCHours() + 8) % 24) * 60 + now.getUTCMinutes();
+  const now     = new Date();
+  const cstH    = (now.getUTCHours() + 8) % 24;
+  const cstM    = cstH * 60 + now.getUTCMinutes();
+  const dow     = new Date(Date.now() + 8 * 3600_000).getUTCDay();
+  const isDST   = isUSDSTBrowser();
+  const openMin = isDST ? 300 : 360;
+
+  if (dow === 0) return '休市中';
+  if (dow === 6 && cstM >= openMin) return '休市中';
+  if (dow === 1 && cstM < openMin) return '休市中';
+
   const ext  = cstM < 240 ? cstM + 1440 : cstM;
   const segs = [
-    [420,450,'中频时段'],[450,540,'高频时段'],[540,810,'中频时段'],
-    [810,930,'高频时段'],[930,1200,'低频时段'],[1200,1350,'高频时段'],
-    [1350,1470,'中频时段'],[1470,1680,'低频时段'],
+    [240,  420,  '低频时段'],  // 新增：04:00–07:00
+    [420,  450,  '中频时段'],
+    [450,  540,  '高频时段'],
+    [540,  810,  '中频时段'],
+    [810,  930,  '高频时段'],
+    [930,  1200, '低频时段'],
+    [1200, 1350, '高频时段'],
+    [1350, 1470, '中频时段'],
+    [1470, 1680, '低频时段'],
   ];
-  const s = segs.find(([a,b]) => ext >= a && ext < b);
-  return s ? s[2] : '休市中';
+  const s = segs.find(([a, b]) => ext >= a && ext < b);
+  return s ? s[2] : '低频时段';
 }
 
 function computeCR(sorted, key) {
@@ -259,101 +329,123 @@ let mainChart = null;
 const idxCharts = {};
 
 // ── Chart options factory ─────────────────────────────────────────────────────
-function chartOptions(ttId, ttTimeId, ttValId, ttCrId, canvas, valFmt, crArr, labels) {
+function chartOptions(ttId, ttTimeId, ttValId, ttCrId, canvas, valFmt, crArr, points) {
   return {
     responsive: true, maintainAspectRatio: false, animation: false,
     plugins: { legend:{ display:false }, tooltip:{ enabled:false } },
     scales: {
       x: {
+        type: 'linear',
+        min: marketOpenTs(points[0]?.x),
         grid: { color: GRID },
-        ticks: { color:'#666', font:{ size:10 }, maxTicksLimit:6 },
+        ticks: {
+          color:'#666', font:{ size:10 }, maxTicksLimit:6,
+          callback: v => {
+            const d = new Date(v + 8 * 3600_000);
+            return String(d.getUTCHours()).padStart(2,'0')
+                 + ':' + String(d.getUTCMinutes()).padStart(2,'0');
+          },
+        },
       },
       y: {
         grid: { color: GRID },
         ticks: {
           color:'#666', font:{ size:10 },
-          callback: v => v.toLocaleString('en-US',{ maximumFractionDigits:0 }),
+          callback: v => v.toLocaleString('en-US', { maximumFractionDigits:0 }),
         },
         afterFit: axis => { axis.width = 42; },
       },
     },
     interaction: { mode:'index', intersect:false },
-    onHover: (evt, els) => {
+    onHover: (evt, els, chart) => {
       const tt = document.getElementById(ttId);
-      if (!els.length) { tt.classList.remove('show'); return; }
-      const mainEl = els.find(e => e.datasetIndex === 0);
-      if (!mainEl) { tt.classList.remove('show'); return; }
-      const i  = mainEl.index;
-      const cr = crArr[i];
-      document.getElementById(ttTimeId).textContent = labels[i];
-      document.getElementById(ttValId).textContent  = valFmt(mainEl.element.$context.parsed.y);
+      if (!evt?.native || !points.length) { tt.classList.remove('show'); return; }
+      // 不依赖 Chart.js 的 index/nearest 自动匹配（参考线、异动点等数据集点数不同，
+      // 会导致匹配到错误的数组下标）。改为自己按鼠标位置在真实数据里找最近点。
+      const xScale  = chart.scales.x;
+      const cursorX = evt.native.offsetX;
+      const t       = xScale.getValueForPixel(cursorX);
+      let lo = 0, hi = points.length - 1;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (points[mid].x < t) lo = mid + 1; else hi = mid;
+      }
+      if (lo > 0 && Math.abs(points[lo-1].x - t) < Math.abs(points[lo].x - t)) lo -= 1;
+      const nearest  = points[lo];
+      const pointPx  = xScale.getPixelForValue(nearest.x);
+      if (Math.abs(pointPx - cursorX) > 15) { tt.classList.remove('show'); return; }
+      const cr = crArr[lo];
+      document.getElementById(ttTimeId).textContent = cstLabel(nearest.x);
+      document.getElementById(ttValId).textContent  = valFmt(nearest.y);
       document.getElementById(ttCrId).textContent   =
         cr == null ? '—' : (cr >= 0 ? '+' : '') + cr.toFixed(4) + '%';
       tt.classList.add('show');
-      const rect = canvas.getBoundingClientRect();
-      let lx = evt.native.clientX - rect.left + 10;
-      if (lx > rect.width - 150) lx -= 160;
+      const wrapRect = canvas.parentElement.getBoundingClientRect();
+      let lx = evt.native.clientX - wrapRect.left + 10;
+      if (lx > wrapRect.width - 150) lx -= 160;
       tt.style.left = lx + 'px';
     },
   };
 }
 
 // ── Make main chart ───────────────────────────────────────────────────────────
-function makeMainChart(labels, data, crArr, sorted, daily, thresholds) {
+function makeMainChart(crArr, sorted, daily, thresholds) {
   const ctx = document.getElementById('main-chart');
   if (mainChart) mainChart.destroy();
 
   const n = sorted.length;
+  const xyData = sorted.map(p => ({ x: p.ts, y: p.r ?? null }));
   const overlays = [];
+
+  const tsRange = (v) => [{ x: marketOpenTs(sorted[0]?.ts), y: v }, { x: chartRightBound(sorted), y: v }];
 
   // 条件3：日内高低线（虚线）
   if (daily?.high != null) overlays.push({
-    data: new Array(n).fill(daily.high),
+    data: tsRange(daily.high),
     borderColor: UP, borderWidth:1, borderDash:[5,3],
     pointRadius:0, fill:false, tension:0, order:5,
   });
   if (daily?.low != null) overlays.push({
-    data: new Array(n).fill(daily.low),
+    data: tsRange(daily.low),
     borderColor: DOWN, borderWidth:1, borderDash:[5,3],
     pointRadius:0, fill:false, tension:0, order:5,
   });
 
   // 条件4：阈值线（点线）
   if (thresholds?.high != null) overlays.push({
-    data: new Array(n).fill(thresholds.high),
+    data: tsRange(thresholds.high),
     borderColor:'#fbbf24', borderWidth:1, borderDash:[2,3],
     pointRadius:0, fill:false, tension:0, order:4,
   });
   if (thresholds?.low != null) overlays.push({
-    data: new Array(n).fill(thresholds.low),
+    data: tsRange(thresholds.low),
     borderColor:'#a78bfa', borderWidth:1, borderDash:[2,3],
     pointRadius:0, fill:false, tension:0, order:4,
   });
 
   // 条件2：异动点（橙色三角）
-  const anomalyData = new Array(n).fill(null);
+  const anomalyData = [];
   for (const pt of daily?.anomaly_points || []) {
     const idx = sorted.findIndex(p => Math.abs(p.ts - pt.ts) < 90_000);
-    if (idx >= 0) anomalyData[idx] = sorted[idx].r;
+    if (idx >= 0) anomalyData.push({ x: sorted[idx].ts, y: sorted[idx].r });
   }
-  if (anomalyData.some(v => v !== null)) overlays.push({
+  if (anomalyData.length) overlays.push({
     data: anomalyData,
     borderColor:'#fb923c', backgroundColor:'#fb923c',
-    pointStyle:'triangle', pointRadius:6, pointHoverRadius:8,
-    showLine:false, fill:false, order:1,
+    pointStyle:'triangle', pointRadius:4, pointHoverRadius:6,
+    showLine:false, fill:false, order:2,
   });
 
   // 条件4：突破点（菱形）
   const addBreachPoint = (ts, color) => {
     if (!ts) return;
-    const bData = new Array(n).fill(null);
     const idx = sorted.findIndex(p => Math.abs(p.ts - ts) < 90_000);
-    if (idx >= 0) { bData[idx] = sorted[idx].r; overlays.push({
-      data: bData,
+    if (idx >= 0) overlays.push({
+      data: [{ x: sorted[idx].ts, y: sorted[idx].r }],
       borderColor: color, backgroundColor: color,
-      pointStyle:'rectRot', pointRadius:7, pointHoverRadius:9,
-      showLine:false, fill:false, order:1,
-    }); }
+      pointStyle:'rectRot', pointRadius:5, pointHoverRadius:7,
+      showLine:false, fill:false, order:2,
+    });
   };
   addBreachPoint(daily?.th_high_ts, '#fbbf24');
   addBreachPoint(daily?.th_low_ts,  '#a78bfa');
@@ -361,11 +453,10 @@ function makeMainChart(labels, data, crArr, sorted, daily, thresholds) {
   mainChart = new Chart(ctx, {
     type: 'line',
     data: {
-      labels,
       datasets: [
         {
-          data, borderColor: ACCENT, borderWidth:2,
-          pointRadius:0, pointHoverRadius:5, pointHoverBackgroundColor: ACCENT,
+          data: xyData, borderColor: ACCENT, borderWidth:2,
+          pointRadius:0, pointHoverRadius:4, pointHoverBackgroundColor: ACCENT,
           fill: true,
           backgroundColor: ctx2 => {
             const g = ctx2.chart.ctx.createLinearGradient(0,0,0,100);
@@ -379,28 +470,58 @@ function makeMainChart(labels, data, crArr, sorted, daily, thresholds) {
       ],
     },
     options: chartOptions('tt','tt-time','tt-val','tt-cr', ctx,
-      v => fmt(v,2), crArr, labels),
+      v => fmt(v,2), crArr, xyData),
   });
 }
 
 // ── Make index chart ──────────────────────────────────────────────────────────
-function makeIdxChart(key, labels, data, crArr, color) {
+function makeIdxChart(key, xyData, crArr, color, session = null) {
   const ctx = document.getElementById('c-'+key);
   if (idxCharts[key]) idxCharts[key].destroy();
+
+  const vlinePlugin = {
+    id: 'vlines_' + key,
+    afterDraw(chart) {
+      if (!session) return;
+      const xs = chart.scales.x;
+      const ys = chart.scales.y;
+      const c  = chart.ctx;
+      const lc = 'rgba(200,200,200,0.35)';
+      [{ ts: session.open, label: '开' }, { ts: session.close, label: '收' }].forEach(({ ts, label }) => {
+        const px = xs.getPixelForValue(ts);
+        if (px < xs.left || px > xs.right) return;
+        c.save();
+        c.beginPath();
+        c.strokeStyle = lc;
+        c.lineWidth   = 1;
+        c.setLineDash([4, 3]);
+        c.moveTo(px, ys.top);
+        c.lineTo(px, ys.bottom);
+        c.stroke();
+        c.fillStyle = lc;
+        c.font      = '10px -apple-system, sans-serif';
+        c.textAlign = 'center';
+        c.fillText(label, px, ys.top + 11);
+        c.restore();
+      });
+    },
+  };
+
   idxCharts[key] = new Chart(ctx, {
     type: 'line',
     data: {
-      labels,
       datasets:[{
-        data, borderColor:color, borderWidth:1.8,
-        pointRadius:0, pointHoverRadius:5, pointHoverBackgroundColor:color,
+        data: xyData,
+        borderColor:color, borderWidth:1.8,
+        pointRadius:0, pointHoverRadius:4, pointHoverBackgroundColor:color,
         fill:true, backgroundColor: color+'18', tension:0.35, spanGaps:true,
       }],
     },
     options: chartOptions(
       'tt-'+key, 'tt-'+key+'-time', 'tt-'+key+'-val', 'tt-'+key+'-cr',
-      ctx, v => fmt(v,1), crArr, labels
+      ctx, v => fmt(v,1), crArr, xyData
     ),
+    plugins: [vlinePlugin],
   });
 }
 
@@ -443,10 +564,9 @@ function render(d, isHistorical = false) {
 
   // Sort chart oldest → newest
   const sorted = [...chart].reverse();
-  const labels = sorted.map(p => cstLabel(p.ts));
 
   // Main chart
-  makeMainChart(labels, sorted.map(p => p.r), computeCR(sorted,'r'), sorted, daily, thresholds);
+  makeMainChart(computeCR(sorted,'r'), sorted, daily, thresholds);
 
   // Index cards
   const indices = [
@@ -475,8 +595,10 @@ function render(d, isHistorical = false) {
       hlEl.textContent = '—';
     }
 
-    const color = chg == null ? ACCENT : chg >= 0 ? UP : DOWN;
-    makeIdxChart(idx.key, labels, sorted.map(p => p[idx.field]), computeCR(sorted, idx.field), color);
+    const color   = chg == null ? ACCENT : chg >= 0 ? UP : DOWN;
+    const xyData  = sorted.map(p => ({ x: p.ts, y: p[idx.field] ?? null }));
+    const session = getMarketSessionTs(idx.key, sorted[0]?.ts ?? Date.now());
+    makeIdxChart(idx.key, xyData, computeCR(sorted, idx.field), color, session);
   }
 
   // Index order: US session after 20:00 CST → NASDAQ, S&P, KOSPI

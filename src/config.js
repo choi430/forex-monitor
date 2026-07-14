@@ -49,8 +49,9 @@ export const DEFAULT_CONFIG = {
 //  20:00–22:30  HIGH  1200–1350 US open window
 //  22:30–00:30  MID   1350–1470 US mid-session
 //  00:30–04:00  LOW   1470–1680 US late / after-hours
-//  04:00–07:00  INACTIVE        outside forex window
+//  04:00–07:00  LOW             pre-session low-freq (market opens at 05:00/06:00)
 export const TIME_SEGMENTS = [
+  { start: 240,  end: 420,  type: 'LOW'  },
   { start: 420,  end: 450,  type: 'MID'  },
   { start: 450,  end: 540,  type: 'HIGH' },
   { start: 540,  end: 810,  type: 'MID'  },
@@ -79,8 +80,9 @@ export function toCSTMinutes(ts) {
  * the previous calendar day's session.
  */
 export function tradingDate(ts) {
-  const cstDate = new Date(ts + 8 * 3600_000);
-  if (cstDate.getUTCHours() < 7) {
+  const cstDate      = new Date(ts + 8 * 3600_000);
+  const sessionStart = isUSDST(ts) ? 5 : 6;  // 夏令时05:00，冬令时06:00
+  if (cstDate.getUTCHours() < sessionStart) {
     cstDate.setUTCDate(cstDate.getUTCDate() - 1);
   }
   return cstDate.toISOString().slice(0, 10);
@@ -105,4 +107,16 @@ export function fmtChg(pct) {
   if (pct == null) return 'N/A';
   const arrow = pct >= 0 ? '▲' : '▼';
   return `${arrow} ${Math.abs(pct).toFixed(3)}%`;
+}
+
+export function isUSDST(ts) {
+  const d    = new Date(ts);
+  const year = d.getUTCFullYear();
+  // 3月第2个周日 2am EST = UTC 7:00
+  const mar1    = new Date(Date.UTC(year, 2, 1));
+  const dstStart = new Date(Date.UTC(year, 2, 1 + (7 - mar1.getUTCDay()) % 7 + 7, 7));
+  // 11月第1个周日 2am EDT = UTC 6:00
+  const nov1    = new Date(Date.UTC(year, 10, 1));
+  const dstEnd  = new Date(Date.UTC(year, 10, 1 + (7 - nov1.getUTCDay()) % 7, 6));
+  return ts >= dstStart.getTime() && ts < dstEnd.getTime();
 }

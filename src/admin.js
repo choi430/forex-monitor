@@ -137,8 +137,8 @@ export function getAdminHtml() {
       <input type="number" id="interval_mid" step="1" min="1">
     </div>
     <div class="row">
-      <div><div class="label">低频间隔（480）</div>
-           <div class="hint">默认 15 分钟 · 15:30–20:00 / 00:30–04:00</div></div>
+      <div><div class="label">低频间隔（660）</div>
+           <div class="hint">默认 15 分钟 · 15:30–20:00 / 00:30–07:00</div></div>
       <input type="number" id="interval_low" step="1" min="1">
     </div>
   </div>

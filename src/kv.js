@@ -4,7 +4,7 @@ import { KV, DEFAULT_CONFIG } from './config.js';
 //
 // KV["state"] = {
 //   daily: {
-//     trade_date:        string,   // trading date (resets 07:00 CST)
+//     trade_date:        string,   // trading date (resets at market open: 05:00 CST summer / 06:00 CST winter)
 //     high:              number,   // session high USD/KRW
 //     low:               number,   // session low  USD/KRW
 //     th_high_triggered: boolean,  // condition4 high threshold hit today
