@@ -602,7 +602,8 @@ function render(d, isHistorical = false) {
   }
 
   // Index order: US session after 20:00 CST → NASDAQ, S&P, KOSPI
-  const cstHour = (new Date().getUTCHours() + 8) % 24;
+  const refTs   = isHistorical ? (sorted[sorted.length - 1]?.ts ?? Date.now()) : Date.now();
+  const cstHour = (new Date(refTs).getUTCHours() + 8) % 24;
   const isUS    = cstHour >= (d.us_session_start ?? 20);
   const order   = isUS ? ['nasdaq','sp500','kospi'] : ['kospi','nasdaq','sp500'];
   const cont    = document.getElementById('idx-container');

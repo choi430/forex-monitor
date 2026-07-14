@@ -15,8 +15,6 @@ import { toCSTMinutes } from './config.js';
 export function evaluateRules(state, config, fetchResult, nowTs, segment = 'UNKNOWN') {
   const notifications = [];
 
-  if (!config.notify_all) return { state, notifications };
-
   const { usdkrw } = fetchResult;
   if (usdkrw == null) return { state, notifications }; // no rate → skip
 
@@ -49,8 +47,8 @@ export function evaluateRules(state, config, fetchResult, nowTs, segment = 'UNKN
   );
 
   // ── Condition 1: Regular Broadcast (24h clock-aligned from market open) ───
-  if (config.notify_1) {
-    const MARKET_OPEN = 300; // 05:00 CST（夏令时开盘，冬令时开盘前INACTIVE故不影响）
+  if (config.notify_all && config.notify_1) {
+    const MARKET_OPEN = isUSDST(nowTs) ? 300 : 360;
     const interval    = config.broadcast_interval;
 
     // 使用普通CST分钟（非extended），对24h窗口做模运算连续编号
@@ -93,7 +91,7 @@ export function evaluateRules(state, config, fetchResult, nowTs, segment = 'UNKN
   }
 
   // ── Condition 2: Anomaly Detection (no cooldown) ─────────────────────────
-  if (config.notify_2 && state.anomaly_buf.length >= 10) {
+  if (config.notify_all && config.notify_2 && state.anomaly_buf.length >= Math.min(10, config.rolling_window)) {
     const rates = state.anomaly_buf.map(p => Math.abs(p.cr));
     const mean  = rates.reduce((a, b) => a + b, 0) / rates.length;
     const std   = Math.sqrt(
@@ -121,7 +119,7 @@ export function evaluateRules(state, config, fetchResult, nowTs, segment = 'UNKN
   }
 
   // ── Condition 3: Session High / Low Touch (30-min cooldown) ──────────────
-  if (config.notify_3) {
+  if (config.notify_all && config.notify_3) {
     const cooldownMs = config.cooldown_3 * 60_000;
 
     if (newHigh) {
@@ -142,7 +140,7 @@ export function evaluateRules(state, config, fetchResult, nowTs, segment = 'UNKN
   }
 
   // ── Condition 4: Absolute Threshold (once per threshold per day) ──────────
-  if (config.notify_4) {
+  if (config.notify_all && config.notify_4) {
     if (
       config.threshold_high != null &&
       !daily.th_high_triggered &&

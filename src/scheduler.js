@@ -62,15 +62,16 @@ export async function handleCron(env) {
   const _cstMin     = _d.getUTCHours() * 60 + _d.getUTCMinutes();
   const _marketOpen = isUSDST(nowTs) ? 300 : 360; // 05:00 或 06:00 CST
 
-  if (_cstMin === _marketOpen) {
+  if (_cstMin >= _marketOpen && _cstMin < _marketOpen + 5) {  // 给 5 分钟容错窗口
     const prevState = await loadState(env.FOREX_KV);
-    if (prevState?.chart?.length) {
-      const expectedDate = tradingDate(nowTs - 60_000);
-      if (prevState.daily.trade_date === expectedDate) {  // ← 加这行
-        const prevConfig = await loadConfig(env.FOREX_KV);
-        await sendClosingSummary(env, nowTs, prevState);
-        await archiveDay(env, nowTs, prevState, prevConfig);
-      }
+    const expectedDate = tradingDate(nowTs - 60_000);
+    if (prevState?.chart?.length && prevState.daily.trade_date === expectedDate
+        && !prevState.daily.archived) {   // 新增标记，避免窗口内重复归档
+      const prevConfig = await loadConfig(env.FOREX_KV);
+      await sendClosingSummary(env, nowTs, prevState);
+      await archiveDay(env, nowTs, prevState, prevConfig);
+      prevState.daily.archived = true;
+      await saveState(env.FOREX_KV, prevState);
     }
   }
 
