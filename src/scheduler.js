@@ -1,5 +1,5 @@
 import { TIME_SEGMENTS, toCSTMinutes, tradingDate, isUSDST, fmtPrice, fmtChg, cstTimeStr } from './config.js';
-import { loadState, saveState, loadConfig, ensureDailyReset, pushChartPoint, saveHistory } from './kv.js';
+import { loadState, saveState, loadConfig, ensureDailyReset, pushChartPoint, saveHistory, loadHistory } from './kv.js';
 import { fetchAllData } from './fetcher.js';
 import { evaluateRules } from './rules.js';
 import {
@@ -75,6 +75,7 @@ export async function handleCron(env) {
     }
   }
 
+  const isMarketOpen = (_cstMin === _marketOpen);
   if (segment === 'INACTIVE') return;
 
   // Load config first to check fetch interval
@@ -114,8 +115,36 @@ export async function handleCron(env) {
   }
 
   // ── Reset daily state if needed ──────────────────────────────────────────
-  const tDate = tradingDate(nowTs);
-  let state   = ensureDailyReset(rawState, tDate, fetchResult.usdkrw);
+  const tDate     = tradingDate(nowTs);
+  let state       = ensureDailyReset(rawState, tDate, fetchResult.usdkrw);
+  const isNewDay  = !rawState || rawState.daily.trade_date !== tDate;
+  if (isNewDay || isMarketOpen) {
+    // 开盘时预设 last_broadcast_ts，使第一次整点播报延迟至开盘后1小时
+    state = { ...state, daily: { ...state.daily, last_broadcast_ts: nowTs } };
+  }
+  
+  // 如果这一条正好是新交易日的第一条数据（开盘时刻），把它也补写进
+  // 前一天归档数据的末尾，让前一天收盘图和当天开盘图能在这个点上连起来
+  if (isNewDay && rawState) {
+    try {
+      const prevDate     = tradingDate(nowTs - 60_000);
+      const prevHistory  = await loadHistory(env.FOREX_KV, prevDate);
+      if (prevHistory?.chart?.length) {
+        const boundaryPoint = {
+          ts: nowTs,
+          r:  fetchResult.usdkrw,
+          k:  fetchResult.kospi?.price  ?? null,
+          n:  fetchResult.nasdaq?.price ?? null,
+          s:  fetchResult.sp500?.price  ?? null,
+        };
+        // chart 是倒序（最新在前），前一天最新的一条应插在数组最前面
+        prevHistory.chart = [boundaryPoint, ...prevHistory.chart];
+        await saveHistory(env.FOREX_KV, prevDate, prevHistory);
+      }
+    } catch (e) {
+      console.error('[forex-monitor] append boundary point to previous day failed:', e);
+    }
+  }
 
   // ── Evaluate push conditions ─────────────────────────────────────────────
   const { state: updatedState, notifications } = evaluateRules(

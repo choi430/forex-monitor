@@ -275,14 +275,10 @@ function getMarketSessionTs(key, refTs) {
 
 // 参考线右端点：如果最后一条数据就是"今天"（实时数据），延伸到当前时间；
 // 如果是历史数据（最后一条数据不是今天），就用当天最后一条数据的时间作为右边界，
-// 不能再用 Date.now()，否则历史图表的参考线会跑到真实的"今天"去。
-function chartRightBound(sorted) {
+function chartRightBound(sorted, isHistorical) {
   const last = sorted[sorted.length - 1]?.ts;
   if (last == null) return Date.now();
-  const now = Date.now();
-  const sameDay = new Date(last + 8 * 3600_000).toDateString()
-                === new Date(now  + 8 * 3600_000).toDateString();
-  return sameDay ? Math.max(last, now) : last;
+  return isHistorical ? last : Math.max(last, Date.now());
 }
 
 function currentSegment() {
@@ -329,7 +325,7 @@ let mainChart = null;
 const idxCharts = {};
 
 // ── Chart options factory ─────────────────────────────────────────────────────
-function chartOptions(ttId, ttTimeId, ttValId, ttCrId, canvas, valFmt, crArr, points) {
+function chartOptions(ttId, ttTimeId, ttValId, ttCrId, canvas, valFmt, crArr, points, maxX) {
   return {
     responsive: true, maintainAspectRatio: false, animation: false,
     plugins: { legend:{ display:false }, tooltip:{ enabled:false } },
@@ -337,6 +333,8 @@ function chartOptions(ttId, ttTimeId, ttValId, ttCrId, canvas, valFmt, crArr, po
       x: {
         type: 'linear',
         min: marketOpenTs(points[0]?.x),
+        max: maxX ?? points[points.length - 1]?.x,
+        bounds: 'data', // 禁止 Chart.js 为了凑"整齐刻度"把轴往外扩到超出真实数据范围
         grid: { color: GRID },
         ticks: {
           color:'#666', font:{ size:10 }, maxTicksLimit:6,
@@ -389,7 +387,7 @@ function chartOptions(ttId, ttTimeId, ttValId, ttCrId, canvas, valFmt, crArr, po
 }
 
 // ── Make main chart ───────────────────────────────────────────────────────────
-function makeMainChart(crArr, sorted, daily, thresholds) {
+function makeMainChart(crArr, sorted, daily, thresholds, isHistorical) {
   const ctx = document.getElementById('main-chart');
   if (mainChart) mainChart.destroy();
 
@@ -397,7 +395,8 @@ function makeMainChart(crArr, sorted, daily, thresholds) {
   const xyData = sorted.map(p => ({ x: p.ts, y: p.r ?? null }));
   const overlays = [];
 
-  const tsRange = (v) => [{ x: marketOpenTs(sorted[0]?.ts), y: v }, { x: chartRightBound(sorted), y: v }];
+  const rightBound = chartRightBound(sorted, isHistorical);
+  const tsRange = (v) => [{ x: marketOpenTs(sorted[0]?.ts), y: v }, { x: rightBound, y: v }];
 
   // 条件3：日内高低线（虚线）
   if (daily?.high != null) overlays.push({
@@ -470,7 +469,7 @@ function makeMainChart(crArr, sorted, daily, thresholds) {
       ],
     },
     options: chartOptions('tt','tt-time','tt-val','tt-cr', ctx,
-      v => fmt(v,2), crArr, xyData),
+      v => fmt(v,2), crArr, xyData, rightBound),
   });
 }
 
@@ -566,7 +565,7 @@ function render(d, isHistorical = false) {
   const sorted = [...chart].reverse();
 
   // Main chart
-  makeMainChart(computeCR(sorted,'r'), sorted, daily, thresholds);
+  makeMainChart(computeCR(sorted,'r'), sorted, daily, thresholds, isHistorical);
 
   // Index cards
   const indices = [

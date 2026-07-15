@@ -139,8 +139,17 @@ export async function loadHistory(kv, date) {
 /** List all available history dates, newest first. */
 export async function listHistoryDates(kv) {
   const result = await kv.list({ prefix: 'history:' });
+  // 算出当前交易日期，历史列表只返回严格早于今天的日期
+  const nowTs   = Date.now();
+  const cstDate = new Date(nowTs + 8 * 3600_000);
+  const sessionStart = cstDate.getUTCHours() < 5 ? 5 : 5;
+  if (cstDate.getUTCHours() < sessionStart) {
+    cstDate.setUTCDate(cstDate.getUTCDate() - 1);
+  }
+  const today = cstDate.toISOString().slice(0, 10);
   return result.keys
     .map(k => k.name.replace('history:', ''))
+    .filter(d => d < today)
     .sort()
     .reverse();
 }
