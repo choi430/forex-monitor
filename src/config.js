@@ -120,3 +120,30 @@ export function isUSDST(ts) {
   const dstEnd  = new Date(Date.UTC(year, 10, 1 + (7 - nov1.getUTCDay()) % 7, 6));
   return ts >= dstStart.getTime() && ts < dstEnd.getTime();
 }
+
+/**
+ * 指数交易时段的开盘/收盘时间戳（refTs 所在那一天，CST）。
+ * key: 'kospi' | 'nasdaq' | 'sp500'
+ * 跟 pwa.js 前端那份 getMarketSessionTs 逻辑保持一致（那份跑在浏览器里，这份跑在 Worker 里，
+ * 运行环境不同没法直接共享代码，只能各写一份，但要保证逻辑同步）。
+ */
+export function getMarketSessionTs(key, refTs) {
+  const isDST  = isUSDST(refTs);
+  const cstRef = new Date(refTs + 8 * 3600_000);
+  const y = cstRef.getUTCFullYear(), mo = cstRef.getUTCMonth(), d = cstRef.getUTCDate();
+  const midUtc = Date.UTC(y, mo, d) - 8 * 3600_000; // 当天 00:00 CST 对应的 UTC 时间戳
+
+  if (key === 'kospi') {
+    return {
+      open:  midUtc + 8    * 3600_000,  // 08:00 CST
+      close: midUtc + 14.5 * 3600_000,  // 14:30 CST
+    };
+  }
+  // NASDAQ / S&P 500
+  const openH  = isDST ? 21.5 : 22.5;  // EDT 21:30 / EST 22:30 CST
+  const closeH = isDST ? 28   : 29;    // EDT 04:00 次日 / EST 05:00 次日 CST
+  return {
+    open:  midUtc + openH  * 3600_000,
+    close: midUtc + closeH * 3600_000,
+  };
+}

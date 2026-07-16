@@ -81,6 +81,10 @@ export function getPWAHtml() {
   .tt-row   { display:flex; justify-content:space-between; gap:14px; }
   .tt-label { color:var(--muted); }
   .tt-val   { font-weight:600; }
+  .delay-label {
+    position:absolute; right:8px; top:6px; font-size:10px; color:var(--muted);
+    background:rgba(15,15,15,.7); padding:2px 6px; border-radius:5px; pointer-events:none;
+  }
   .section-label {
     font-size:11px; color:var(--muted); letter-spacing:.06em;
     text-transform:uppercase; margin:12px 12px 6px;
@@ -144,10 +148,12 @@ export function getPWAHtml() {
   </div>
   <div class="chart-wrap" style="height:240px">
     <canvas id="main-chart" role="img" aria-label="USD/KRW日内走势"></canvas>
+    <div class="delay-label" id="delay-main"></div>
     <div class="tooltip-box" id="tt">
       <div class="tt-time" id="tt-time">—</div>
       <div class="tt-row"><span class="tt-label">汇率</span><span class="tt-val" id="tt-val">—</span></div>
       <div class="tt-row"><span class="tt-label">变化率/分</span><span class="tt-val" id="tt-cr">—</span></div>
+      <div class="tt-row"><span class="tt-label">延迟</span><span class="tt-val" id="tt-delay">—</span></div>
     </div>
   </div>
 </div>
@@ -165,10 +171,12 @@ export function getPWAHtml() {
     </div>
     <div class="chart-wrap" style="height:240px">
       <canvas id="c-kospi" role="img" aria-label="KOSPI走势"></canvas>
+      <div class="delay-label" id="delay-kospi"></div>
       <div class="tooltip-box" id="tt-kospi">
         <div class="tt-time" id="tt-kospi-time">—</div>
         <div class="tt-row"><span class="tt-label">KOSPI</span><span class="tt-val" id="tt-kospi-val">—</span></div>
         <div class="tt-row"><span class="tt-label">变化率/分</span><span class="tt-val" id="tt-kospi-cr">—</span></div>
+        <div class="tt-row"><span class="tt-label">延迟</span><span class="tt-val" id="tt-kospi-delay">—</span></div>
       </div>
     </div>
   </div>
@@ -183,10 +191,12 @@ export function getPWAHtml() {
     </div>
     <div class="chart-wrap" style="height:240px">
       <canvas id="c-nasdaq" role="img" aria-label="NASDAQ走势"></canvas>
+      <div class="delay-label" id="delay-nasdaq"></div>
       <div class="tooltip-box" id="tt-nasdaq">
         <div class="tt-time" id="tt-nasdaq-time">—</div>
         <div class="tt-row"><span class="tt-label">NASDAQ</span><span class="tt-val" id="tt-nasdaq-val">—</span></div>
         <div class="tt-row"><span class="tt-label">变化率/分</span><span class="tt-val" id="tt-nasdaq-cr">—</span></div>
+        <div class="tt-row"><span class="tt-label">延迟</span><span class="tt-val" id="tt-nasdaq-delay">—</span></div>
       </div>
     </div>
   </div>
@@ -201,10 +211,12 @@ export function getPWAHtml() {
     </div>
     <div class="chart-wrap" style="height:240px">
       <canvas id="c-sp500" role="img" aria-label="S&P 500走势"></canvas>
+      <div class="delay-label" id="delay-sp500"></div>
       <div class="tooltip-box" id="tt-sp500">
         <div class="tt-time" id="tt-sp500-time">—</div>
         <div class="tt-row"><span class="tt-label">S&amp;P 500</span><span class="tt-val" id="tt-sp500-val">—</span></div>
         <div class="tt-row"><span class="tt-label">变化率/分</span><span class="tt-val" id="tt-sp500-cr">—</span></div>
+        <div class="tt-row"><span class="tt-label">延迟</span><span class="tt-val" id="tt-sp500-delay">—</span></div>
       </div>
     </div>
   </div>
@@ -216,6 +228,15 @@ export function getPWAHtml() {
 <script>
 // ── Constants ────────────────────────────────────────────────────────────────
 const UP = '#f87171', DOWN = '#34d399', ACCENT = '#60a5fa', GRID = '#333';
+
+function fmtDelay(sec) {
+  if (sec < 60) return sec + '秒';
+  const m = Math.floor(sec / 60), s = sec % 60;
+  return m + '分' + s + '秒';
+}
+function fmtDelayLabel(sec) {
+  return '延迟 ' + (sec == null ? '/' : fmtDelay(sec));
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 const fmt = (n, d=2) => n == null ? '—'
@@ -325,7 +346,7 @@ let mainChart = null;
 const idxCharts = {};
 
 // ── Chart options factory ─────────────────────────────────────────────────────
-function chartOptions(ttId, ttTimeId, ttValId, ttCrId, canvas, valFmt, crArr, points, maxX) {
+function chartOptions(ttId, ttTimeId, ttValId, ttCrId, ttDelayId, canvas, valFmt, crArr, points, maxX, session, localTz) {
   return {
     responsive: true, maintainAspectRatio: false, animation: false,
     plugins: { legend:{ display:false }, tooltip:{ enabled:false } },
@@ -340,8 +361,13 @@ function chartOptions(ttId, ttTimeId, ttValId, ttCrId, canvas, valFmt, crArr, po
           color:'#666', font:{ size:10 }, maxTicksLimit:6,
           callback: v => {
             const d = new Date(v + 8 * 3600_000);
-            return String(d.getUTCHours()).padStart(2,'0')
+            const cst = String(d.getUTCHours()).padStart(2,'0')
                  + ':' + String(d.getUTCMinutes()).padStart(2,'0');
+            if (!localTz) return cst;
+            const dl = new Date(v + localTz.offsetMs);
+            const local = String(dl.getUTCHours()).padStart(2,'0')
+                        + ':' + String(dl.getUTCMinutes()).padStart(2,'0');
+            return [cst, local + ' ' + localTz.abbr];
           },
         },
       },
@@ -377,6 +403,16 @@ function chartOptions(ttId, ttTimeId, ttValId, ttCrId, canvas, valFmt, crArr, po
       document.getElementById(ttValId).textContent  = valFmt(nearest.y);
       document.getElementById(ttCrId).textContent   =
         cr == null ? '—' : (cr >= 0 ? '+' : '') + cr.toFixed(4) + '%';
+      if (ttDelayId) {
+        // 延迟显示"/"的情况：这条数据是缓存旧值(stale)、没有真实数据时间、
+        // 跟上一个点数值完全相同、或者这个点的时间根本不在该指数的交易时段内
+        const prev = points[lo - 1];
+        const isFlat  = session && prev != null && prev.y === nearest.y;
+        const outside = session && (nearest.x < session.open || nearest.x >= session.close);
+        document.getElementById(ttDelayId).textContent =
+          (nearest.stale || nearest.dataTs == null || isFlat || outside)
+            ? '/' : fmtDelay(Math.max(0, Math.round((nearest.x - nearest.dataTs) / 1000)));
+      }
       tt.classList.add('show');
       const wrapRect = canvas.parentElement.getBoundingClientRect();
       let lx = evt.native.clientX - wrapRect.left + 10;
@@ -392,7 +428,7 @@ function makeMainChart(crArr, sorted, daily, thresholds, isHistorical) {
   if (mainChart) mainChart.destroy();
 
   const n = sorted.length;
-  const xyData = sorted.map(p => ({ x: p.ts, y: p.r ?? null }));
+  const xyData = sorted.map(p => ({ x: p.ts, y: p.r ?? null, dataTs: p.r_ts ?? null, stale: !!p.r_stale }));
   const overlays = [];
 
   const rightBound = chartRightBound(sorted, isHistorical);
@@ -449,6 +485,15 @@ function makeMainChart(crArr, sorted, daily, thresholds, isHistorical) {
   addBreachPoint(daily?.th_high_ts, '#fbbf24');
   addBreachPoint(daily?.th_low_ts,  '#a78bfa');
 
+  // 红点：这一条数据抓取失败、用了缓存旧值
+  const staleData = sorted.filter(p => p.r_stale).map(p => ({ x: p.ts, y: p.r }));
+  if (staleData.length) overlays.push({
+    data: staleData,
+    borderColor:'#ef4444', backgroundColor:'#ef4444',
+    pointStyle:'circle', pointRadius:3, pointHoverRadius:5,
+    showLine:false, fill:false, order:1,
+  });
+
   mainChart = new Chart(ctx, {
     type: 'line',
     data: {
@@ -468,13 +513,13 @@ function makeMainChart(crArr, sorted, daily, thresholds, isHistorical) {
         ...overlays,
       ],
     },
-    options: chartOptions('tt','tt-time','tt-val','tt-cr', ctx,
+    options: chartOptions('tt','tt-time','tt-val','tt-cr','tt-delay', ctx,
       v => fmt(v,2), crArr, xyData, rightBound),
   });
 }
 
 // ── Make index chart ──────────────────────────────────────────────────────────
-function makeIdxChart(key, xyData, crArr, color, session = null) {
+function makeIdxChart(key, xyData, crArr, color, session = null, staleData = [], localTz = null) {
   const ctx = document.getElementById('c-'+key);
   if (idxCharts[key]) idxCharts[key].destroy();
 
@@ -509,16 +554,24 @@ function makeIdxChart(key, xyData, crArr, color, session = null) {
   idxCharts[key] = new Chart(ctx, {
     type: 'line',
     data: {
-      datasets:[{
-        data: xyData,
-        borderColor:color, borderWidth:1.8,
-        pointRadius:0, pointHoverRadius:4, pointHoverBackgroundColor:color,
-        fill:true, backgroundColor: color+'18', tension:0.35, spanGaps:true,
-      }],
+      datasets:[
+        {
+          data: xyData,
+          borderColor:color, borderWidth:1.8,
+          pointRadius:0, pointHoverRadius:4, pointHoverBackgroundColor:color,
+          fill:true, backgroundColor: color+'18', tension:0.35, spanGaps:true,
+        },
+        ...(staleData.length ? [{
+          data: staleData,
+          borderColor:'#ef4444', backgroundColor:'#ef4444',
+          pointStyle:'circle', pointRadius:3, pointHoverRadius:5,
+          showLine:false, fill:false, order:1,
+        }] : []),
+      ],
     },
     options: chartOptions(
-      'tt-'+key, 'tt-'+key+'-time', 'tt-'+key+'-val', 'tt-'+key+'-cr',
-      ctx, v => fmt(v,1), crArr, xyData
+      'tt-'+key, 'tt-'+key+'-time', 'tt-'+key+'-val', 'tt-'+key+'-cr', 'tt-'+key+'-delay',
+      ctx, v => fmt(v,1), crArr, xyData, undefined, session, localTz
     ),
     plugins: [vlinePlugin],
   });
@@ -541,6 +594,7 @@ function render(d, isHistorical = false) {
 
   // Main price
   document.getElementById('main-price').textContent = fmt(latest.usdkrw);
+  document.getElementById('delay-main').textContent = fmtDelayLabel(latest.usdkrw_delay_sec ?? null);
 
   // Day change badge
   const dayChg = latest.usdkrw_prev
@@ -583,6 +637,7 @@ function render(d, isHistorical = false) {
     const chgEl = document.getElementById(idx.key+'-chg');
     chgEl.textContent = fmtChg(chg);
     chgEl.className   = 'idx-chg ' + chgCls(chg);
+    document.getElementById('delay-'+idx.key).textContent = fmtDelayLabel(latest[idx.key+'_delay_sec'] ?? null);
 
     // Daily high/low from chart history
     const vals = sorted.map(p => p[idx.field]).filter(v => v != null);
@@ -595,9 +650,20 @@ function render(d, isHistorical = false) {
     }
 
     const color   = chg == null ? ACCENT : chg >= 0 ? UP : DOWN;
-    const xyData  = sorted.map(p => ({ x: p.ts, y: p[idx.field] ?? null }));
+    const tsField    = idx.field + '_ts';
+    const staleField = idx.field + '_stale';
+    const xyData  = sorted.map(p => ({
+      x: p.ts, y: p[idx.field] ?? null,
+      dataTs: p[tsField] ?? null, stale: !!p[staleField],
+    }));
     const session = getMarketSessionTs(idx.key, sorted[0]?.ts ?? Date.now());
-    makeIdxChart(idx.key, xyData, computeCR(sorted, idx.field), color, session);
+    const staleData = sorted.filter(p => p[staleField]).map(p => ({ x: p.ts, y: p[idx.field] }));
+        const localTz = idx.key === 'kospi'
+      ? { offsetMs: 9 * 3600_000, abbr: 'KST' }  // 韩国时间，无夏令时
+      : (isUSDSTBrowser(sorted[0]?.ts ?? Date.now())
+          ? { offsetMs: -4 * 3600_000, abbr: 'EDT' }  // 美东夏令时
+          : { offsetMs: -5 * 3600_000, abbr: 'EST' }); // 美东冬令时
+    makeIdxChart(idx.key, xyData, computeCR(sorted, idx.field), color, session, staleData, localTz);
   }
 
   // Index order: US session after 20:00 CST → NASDAQ, S&P, KOSPI

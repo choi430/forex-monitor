@@ -60,6 +60,15 @@ export default {
       );
     }
 
+    // ── 外部触发器（cron-job.org）─────────────────────────────────────────
+    if (pathname === '/trigger' && request.method === 'POST') {
+      if (request.headers.get('X-Trigger-Token') !== env.TRIGGER_TOKEN) {
+        return new Response('Forbidden', { status: 403 });
+      }
+      ctx.waitUntil(handleCron(env));
+      return new Response('OK');
+    }
+
     // ── Feishu Event Webhook ─────────────────────────────────────────────────
     if (pathname === '/feishu/webhook' && request.method === 'POST') {
       return handleFeishuWebhook(request, env, ctx);
