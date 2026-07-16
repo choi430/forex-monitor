@@ -91,7 +91,7 @@ export function evaluateRules(state, config, fetchResult, nowTs, segment = 'UNKN
   }
 
   // ── Condition 2: Anomaly Detection (no cooldown) ─────────────────────────
-  if (config.notify_all && config.notify_2 && state.anomaly_buf.length >= Math.min(10, config.rolling_window)) {
+  if (state.anomaly_buf.length >= Math.min(10, config.rolling_window)) {
     const rates = state.anomaly_buf.map(p => Math.abs(p.cr));
     const mean  = rates.reduce((a, b) => a + b, 0) / rates.length;
     const std   = Math.sqrt(
@@ -100,21 +100,24 @@ export function evaluateRules(state, config, fetchResult, nowTs, segment = 'UNKN
 
     // Only trigger if std is meaningful (avoid division-by-zero noise)
     if (std > 0.0001 && Math.abs(changeRatePerMin) > mean + config.n_value * std) {
-      const dir = changeRatePerMin > 0 ? '快速上涨 ▲' : '快速下跌 ▼';
-      notifications.push({
-        type:   'anomaly',
-        reason: `汇率异动：${dir}`,
-        extra:  {
-          changeRatePerMin,
-          mean:      mean.toFixed(4),
-          std:       std.toFixed(4),
-          threshold: (Math.abs(mean) + config.n_value * std).toFixed(4),
-        },
-      });
-      // 记录异动点，最多保留50个
+      // 记录异动点，最多保留50个（图表标记，始终记录）
       daily.anomaly_points = [...(daily.anomaly_points ?? [])];
       daily.anomaly_points.push({ ts: nowTs, rate: usdkrw, dir: changeRatePerMin > 0 ? 'up' : 'down' });
       if (daily.anomaly_points.length > 50) daily.anomaly_points.splice(0, daily.anomaly_points.length - 50);
+
+      if (config.notify_all && config.notify_2) {
+        const dir = changeRatePerMin > 0 ? '快速上涨 ▲' : '快速下跌 ▼';
+        notifications.push({
+          type:   'anomaly',
+          reason: `汇率异动：${dir}`,
+          extra:  {
+            changeRatePerMin,
+            mean:      mean.toFixed(4),
+            std:       std.toFixed(4),
+            threshold: (Math.abs(mean) + config.n_value * std).toFixed(4),
+          },
+        });
+      }
     }
   }
 
@@ -140,31 +143,33 @@ export function evaluateRules(state, config, fetchResult, nowTs, segment = 'UNKN
   }
 
   // ── Condition 4: Absolute Threshold (once per threshold per day) ──────────
-  if (config.notify_all && config.notify_4) {
     if (
       config.threshold_high != null &&
       !daily.th_high_triggered &&
       usdkrw >= config.threshold_high
     ) {
+    daily.th_high_triggered = true;
+    daily.th_high_ts = nowTs;
+    if (config.notify_all && config.notify_4) {
       notifications.push({
         type:   'th_high',
         reason: `突破高位阈值 ${config.threshold_high}`,
       });
-      daily.th_high_triggered = true;
-      daily.th_high_ts = nowTs;
     }
+  }
 
     if (
       config.threshold_low != null &&
       !daily.th_low_triggered &&
       usdkrw <= config.threshold_low
     ) {
+    daily.th_low_triggered = true;
+    daily.th_low_ts = nowTs;
+    if (config.notify_all && config.notify_4) {
       notifications.push({
         type:   'th_low',
         reason: `跌破低位阈值 ${config.threshold_low}`,
       });
-      daily.th_low_triggered = true;
-      daily.th_low_ts = nowTs;
     }
   }
 

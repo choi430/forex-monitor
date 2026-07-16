@@ -1,4 +1,4 @@
-import { TIME_SEGMENTS, toCSTMinutes, tradingDate, isUSDST, fmtPrice, fmtChg, cstTimeStr } from './config.js';
+import { TIME_SEGMENTS, toCSTMinutes, tradingDate, isUSDST, getMarketSessionTs, fmtPrice, fmtChg, cstTimeStr } from './config.js';
 import { loadState, saveState, loadConfig, ensureDailyReset, pushChartPoint, saveHistory, loadHistory } from './kv.js';
 import { fetchAllData } from './fetcher.js';
 import { evaluateRules } from './rules.js';
@@ -64,12 +64,13 @@ export async function handleCron(env) {
 
   if (_cstMin >= _marketOpen && _cstMin < _marketOpen + 5) {  // 给 5 分钟容错窗口
     const prevState = await loadState(env.FOREX_KV);
-    const expectedDate = tradingDate(nowTs - 60_000);
-    if (prevState?.chart?.length && prevState.daily.trade_date === expectedDate
-        && !prevState.daily.archived) {   // 新增标记，避免窗口内重复归档
+    const todayDate  = tradingDate(nowTs);
+    if (prevState?.chart?.length && prevState.daily.trade_date
+        && prevState.daily.trade_date !== todayDate   // 必须确实是"前一天"，不能是今天自己
+        && !prevState.daily.archived) {   // 避免窗口内重复归档
       const prevConfig = await loadConfig(env.FOREX_KV);
       await sendClosingSummary(env, nowTs, prevState);
-      await archiveDay(env, nowTs, prevState, prevConfig);
+      await archiveDay(env, prevState.daily.trade_date, prevState, prevConfig);
       prevState.daily.archived = true;
       await saveState(env.FOREX_KV, prevState);
     }
@@ -108,7 +109,7 @@ export async function handleCron(env) {
   // If USD/KRW unavailable we can't run rules — save fetch data and exit
   if (fetchResult.usdkrw == null) {
     const partialState = rawState
-      ? { ...rawState, latest: buildLatest(fetchResult), last_error_notify_ts: nowTs }
+      ? { ...rawState, latest: buildLatest(fetchResult, rawState?.latest), last_error_notify_ts: nowTs }
       : null;
     if (partialState) await saveState(env.FOREX_KV, partialState);
     return;
@@ -127,7 +128,7 @@ export async function handleCron(env) {
   // 前一天归档数据的末尾，让前一天收盘图和当天开盘图能在这个点上连起来
   if (isNewDay && rawState) {
     try {
-      const prevDate     = tradingDate(nowTs - 60_000);
+      const prevDate     = rawState.daily.trade_date;
       const prevHistory  = await loadHistory(env.FOREX_KV, prevDate);
       if (prevHistory?.chart?.length) {
         const boundaryPoint = {
@@ -136,6 +137,14 @@ export async function handleCron(env) {
           k:  fetchResult.kospi?.price  ?? null,
           n:  fetchResult.nasdaq?.price ?? null,
           s:  fetchResult.sp500?.price  ?? null,
+          r_stale: fetchResult.usdkrw_stale,
+          k_stale: fetchResult.kospi?.stale  ?? true,
+          n_stale: fetchResult.nasdaq?.stale ?? true,
+          s_stale: fetchResult.sp500?.stale  ?? true,
+          r_ts: fetchResult.usdkrw_ts     ?? null,
+          k_ts: fetchResult.kospi?.dataTs  ?? null,
+          n_ts: fetchResult.nasdaq?.dataTs ?? null,
+          s_ts: fetchResult.sp500?.dataTs  ?? null,
         };
         // chart 是倒序（最新在前），前一天最新的一条应插在数组最前面
         prevHistory.chart = [boundaryPoint, ...prevHistory.chart];
@@ -152,7 +161,7 @@ export async function handleCron(env) {
   );
 
   // ── Update latest snapshot ────────────────────────────────────────────────
-  updatedState.latest = buildLatest(fetchResult);
+  updatedState.latest = buildLatest(fetchResult, rawState?.latest);
 
   // ── Update intraday chart history ─────────────────────────────────────────
   updatedState.chart = pushChartPoint(updatedState.chart ?? [], {
@@ -161,6 +170,14 @@ export async function handleCron(env) {
     k:  fetchResult.kospi?.price   ?? null,
     n:  fetchResult.nasdaq?.price  ?? null,
     s:  fetchResult.sp500?.price   ?? null,
+    r_stale: fetchResult.usdkrw_stale,
+    k_stale: fetchResult.kospi?.stale  ?? true,
+    n_stale: fetchResult.nasdaq?.stale ?? true,
+    s_stale: fetchResult.sp500?.stale  ?? true,
+    r_ts: fetchResult.usdkrw_ts     ?? null,
+    k_ts: fetchResult.kospi?.dataTs  ?? null,
+    n_ts: fetchResult.nasdaq?.dataTs ?? null,
+    s_ts: fetchResult.sp500?.dataTs  ?? null,
   });
 
   // Carry forward error notify timestamp if no new errors
@@ -193,18 +210,52 @@ export async function handleCron(env) {
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
 
-function buildLatest(f) {
+function buildLatest(f, cachedLatest) {
+  const nowTs = f.ts;
+
+  // 延迟(秒)计算规则：
+  //  - stale(这次抓取失败、用了旧值) → null（前端显示"/"，红点已经能说明问题，不重复用延迟栏提示错误）
+  //  - 没有真实数据时间戳 → null
+  //  - 跟上一次抓到的值完全相同 → 判定为盘前/盘后不再更新 → null（前端显示"/"）
+  //  - 不在该指数的交易时段内 → null（前端显示"/"）——汇率不做这个限制，传 key=null 跳过
+  //  - 否则 → 抓取时间 - 真实数据时间，秒
+  const delay = (price, dataTs, stale, prevPrice, key) => {
+    if (stale || dataTs == null) return null;
+    if (key && prevPrice != null && price === prevPrice) return null;
+    if (key) {
+      const { open, close } = getMarketSessionTs(key, nowTs);
+      if (nowTs < open || nowTs >= close) return null;
+    }
+    return Math.max(0, Math.round((nowTs - dataTs) / 1000));
+  };
+
   return {
-    usdkrw:       f.usdkrw,
-    usdkrw_prev:  f.usdkrw_prev,
-    kospi_price:  f.kospi?.price        ?? null,
-    kospi_prev:   f.kospi?.prevClose    ?? null,
-    nasdaq_price: f.nasdaq?.price       ?? null,
-    nasdaq_prev:  f.nasdaq?.prevClose   ?? null,
-    sp500_price:  f.sp500?.price        ?? null,
-    sp500_prev:   f.sp500?.prevClose    ?? null,
-    errors:       f.errors,
-    ts:           f.ts,
+    usdkrw:           f.usdkrw,
+    usdkrw_prev:      f.usdkrw_prev,
+    usdkrw_data_ts:   f.usdkrw_ts,
+    usdkrw_stale:     f.usdkrw_stale,
+    usdkrw_delay_sec: delay(f.usdkrw, f.usdkrw_ts, f.usdkrw_stale, cachedLatest?.usdkrw, null),
+
+    kospi_price:      f.kospi?.price        ?? null,
+    kospi_prev:       f.kospi?.prevClose    ?? null,
+    kospi_data_ts:    f.kospi?.dataTs       ?? null,
+    kospi_stale:      f.kospi?.stale        ?? true,
+    kospi_delay_sec:  delay(f.kospi?.price, f.kospi?.dataTs, f.kospi?.stale, cachedLatest?.kospi_price, 'kospi'),
+
+    nasdaq_price:     f.nasdaq?.price       ?? null,
+    nasdaq_prev:      f.nasdaq?.prevClose   ?? null,
+    nasdaq_data_ts:   f.nasdaq?.dataTs      ?? null,
+    nasdaq_stale:     f.nasdaq?.stale       ?? true,
+    nasdaq_delay_sec: delay(f.nasdaq?.price, f.nasdaq?.dataTs, f.nasdaq?.stale, cachedLatest?.nasdaq_price, 'nasdaq'),
+
+    sp500_price:      f.sp500?.price        ?? null,
+    sp500_prev:       f.sp500?.prevClose    ?? null,
+    sp500_data_ts:    f.sp500?.dataTs       ?? null,
+    sp500_stale:      f.sp500?.stale        ?? true,
+    sp500_delay_sec:  delay(f.sp500?.price, f.sp500?.dataTs, f.sp500?.stale, cachedLatest?.sp500_price, 'sp500'),
+
+    errors:           f.errors,
+    ts:               f.ts,
   };
 }
 
@@ -293,14 +344,11 @@ async function sendClosingSummary(env, nowTs, state = null) {
 
 // ─── Archive Day ──────────────────────────────────────────────────────────────
 
-async function archiveDay(env, nowTs, state = null, config = null) {
+async function archiveDay(env, date, state = null, config = null) {
   try {
     if (!state) state = await loadState(env.FOREX_KV);
     if (!state?.chart?.length) return;
     if (!config) config = await loadConfig(env.FOREX_KV);
-
-    // At 04:00, tradingDate still points to "today's" session
-    const date   = tradingDate(nowTs - 60_000);
 
     await saveHistory(env.FOREX_KV, date, {
       date,
