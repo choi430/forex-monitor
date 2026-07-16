@@ -55,6 +55,22 @@ function shouldFetch(segment, config) {
 
 export async function handleCron(env) {
   const nowTs   = Date.now();
+  
+  // ── 互斥锁：防止两个触发源（Cloudflare Cron + 外部 cron-job.org）在同一
+  //    分钟内重复调用，导致重复播报、chart 出现两条数据 ──────────────────
+  const epochMinute = Math.floor(nowTs / 60_000);
+  const lockKey      = `cron_lock:${epochMinute}`;
+  const alreadyRan    = await env.FOREX_KV.get(lockKey);
+  if (alreadyRan) {
+    console.log('[forex-monitor] duplicate trigger skipped for minute', epochMinute);
+    return;
+  }
+  // 2 分钟后自动过期，避免这个 key 无限堆积；不需要精确原子性，
+  // 只是尽量降低两边"撞车"的概率（Cloudflare KV 本身不是强一致，极端情况下
+  // 两个请求几乎同时读到都还没写入的状态，仍有极小概率同时通过，但已经能
+  // 挡掉绝大多数场景）。
+  await env.FOREX_KV.put(lockKey, String(nowTs), { expirationTtl: 120 });
+
   const segment = getSegment(nowTs);
 
 // ── 每日交易日边界：归档前一日数据（先于状态重置）────────────────────────
