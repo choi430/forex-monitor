@@ -1,5 +1,5 @@
 import { TIME_SEGMENTS, toCSTMinutes, tradingDate, isUSDST, getMarketSessionTs, fmtPrice, fmtChg, cstTimeStr } from './config.js';
-import { loadState, saveState, loadConfig, ensureDailyReset, pushChartPoint, saveHistory, loadHistory } from './kv.js';
+import { loadState, saveState, loadConfig, saveConfig, ensureDailyReset, pushChartPoint, saveHistory, loadHistory } from './kv.js';
 import { fetchAllData } from './fetcher.js';
 import { evaluateRules } from './rules.js';
 import {
@@ -172,9 +172,18 @@ export async function handleCron(env) {
   }
 
   // ── Evaluate push conditions ─────────────────────────────────────────────
-  const { state: updatedState, notifications } = evaluateRules(
+  const { state: updatedState, notifications, configPatch } = evaluateRules(
     state, config, fetchResult, nowTs, segment,
   );
+  
+  // 触碰阈值后自动调整阈值（高位+5 / 低位-5），写回配置，下次读取 config 就是新值
+  if (configPatch) {
+    try {
+      await saveConfig(env.FOREX_KV, { ...config, ...configPatch });
+    } catch (e) {
+      console.error('[forex-monitor] auto-adjust threshold failed:', e);
+    }
+  }
 
   // ── Update latest snapshot ────────────────────────────────────────────────
   updatedState.latest = buildLatest(fetchResult, rawState?.latest);

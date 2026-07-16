@@ -471,19 +471,23 @@ function makeMainChart(crArr, sorted, daily, thresholds, isHistorical) {
     showLine:false, fill:false, order:2,
   });
 
-  // 条件4：突破点（菱形）
-  const addBreachPoint = (ts, color) => {
-    if (!ts) return;
-    const idx = sorted.findIndex(p => Math.abs(p.ts - ts) < 90_000);
-    if (idx >= 0) overlays.push({
-      data: [{ x: sorted[idx].ts, y: sorted[idx].r }],
+  // 条件4：突破点（菱形），当天可能有多个
+  const addBreachPoints = (points, color) => {
+    if (!points?.length) return;
+    const data = [];
+    for (const pt of points) {
+      const idx = sorted.findIndex(p => Math.abs(p.ts - pt.ts) < 90_000);
+      if (idx >= 0) data.push({ x: sorted[idx].ts, y: sorted[idx].r });
+    }
+    if (data.length) overlays.push({
+      data,
       borderColor: color, backgroundColor: color,
       pointStyle:'rectRot', pointRadius:5, pointHoverRadius:7,
       showLine:false, fill:false, order:2,
     });
   };
-  addBreachPoint(daily?.th_high_ts, '#fbbf24');
-  addBreachPoint(daily?.th_low_ts,  '#a78bfa');
+  addBreachPoints(daily?.th_high_points, '#fbbf24');
+  addBreachPoints(daily?.th_low_points,  '#a78bfa');
 
   // 红点：这一条数据抓取失败、用了缓存旧值
   const staleData = sorted.filter(p => p.r_stale).map(p => ({ x: p.ts, y: p.r }));
