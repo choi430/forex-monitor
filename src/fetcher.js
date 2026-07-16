@@ -112,5 +112,8 @@ export async function fetchAllData(env, cached) {
     }),
   ]);
 
+  const elapsed = Date.now() - ts;
+  console.log(`[fetchAllData] total=${elapsed}ms usdkrw=${usdkrw != null} kospi=${indices.kospi != null} nasdaq=${indices.nasdaq != null} sp500=${indices.sp500 != null}`);
+
   return { usdkrw, usdkrw_prev, usdkrw_ts, usdkrw_stale, ...indices, errors, ts };
 }

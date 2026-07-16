@@ -15,6 +15,10 @@ binding  = "FOREX_KV"
 id       = "f9f391bf1c124ad8a46585aabbad6908"
 preview_id = "f085a7c21b3441e6b38dc823cf7c987b"
 
+[observability.logs]
+enabled = true
+invocation_logs = true
+
 # Secrets (set via: wrangler secret put SECRET_NAME)
 # TWELVE_DATA_KEY       — Twelve Data API key
 # FEISHU_APP_ID         — 飞书自建应用 App ID
