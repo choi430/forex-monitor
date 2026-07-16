@@ -91,6 +91,7 @@ export function evaluateRules(state, config, fetchResult, nowTs, segment = 'UNKN
   }
 
   // ── Condition 2: Anomaly Detection (no cooldown) ─────────────────────────
+  // 检测和记录（供图表画异动三角）不受通知开关影响，只有"要不要推送"才判断开关
   if (state.anomaly_buf.length >= Math.min(10, config.rolling_window)) {
     const rates = state.anomaly_buf.map(p => Math.abs(p.cr));
     const mean  = rates.reduce((a, b) => a + b, 0) / rates.length;
@@ -142,33 +143,38 @@ export function evaluateRules(state, config, fetchResult, nowTs, segment = 'UNKN
     }
   }
 
-  // ── Condition 4: Absolute Threshold (once per threshold per day) ──────────
-    if (
-      config.threshold_high != null &&
-      !daily.th_high_triggered &&
-      usdkrw >= config.threshold_high
-    ) {
-    daily.th_high_triggered = true;
-    daily.th_high_ts = nowTs;
+  // ── Condition 4: Absolute Threshold（每次抓取只要触及阈值就记录+推送，不限次数）
+  // 检测和记录（供图表画突破菱形）不受通知开关影响，只有"要不要推送"才判断开关
+  let configPatch = null;
+
+  if (config.threshold_high != null && usdkrw >= config.threshold_high) {
+    daily.th_high_points = [...(daily.th_high_points ?? [])];
+    daily.th_high_points.push({ ts: nowTs, rate: usdkrw });
+    if (daily.th_high_points.length > 50) daily.th_high_points.splice(0, daily.th_high_points.length - 50);
+
+    const newThreshold = config.threshold_high + 5;
+    configPatch = { ...(configPatch ?? {}), threshold_high: newThreshold };
+
     if (config.notify_all && config.notify_4) {
       notifications.push({
         type:   'th_high',
-        reason: `突破高位阈值 ${config.threshold_high}`,
+        reason: `突破高位阈值 ${config.threshold_high}（已自动上调至 ${newThreshold}）`,
       });
     }
   }
 
-    if (
-      config.threshold_low != null &&
-      !daily.th_low_triggered &&
-      usdkrw <= config.threshold_low
-    ) {
-    daily.th_low_triggered = true;
-    daily.th_low_ts = nowTs;
+  if (config.threshold_low != null && usdkrw <= config.threshold_low) {
+    daily.th_low_points = [...(daily.th_low_points ?? [])];
+    daily.th_low_points.push({ ts: nowTs, rate: usdkrw });
+    if (daily.th_low_points.length > 50) daily.th_low_points.splice(0, daily.th_low_points.length - 50);
+
+    const newThreshold = config.threshold_low - 5;
+    configPatch = { ...(configPatch ?? {}), threshold_low: newThreshold };
+
     if (config.notify_all && config.notify_4) {
       notifications.push({
         type:   'th_low',
-        reason: `跌破低位阈值 ${config.threshold_low}`,
+        reason: `跌破低位阈值 ${config.threshold_low}（已自动下调至 ${newThreshold}）`,
       });
     }
   }
@@ -177,5 +183,6 @@ export function evaluateRules(state, config, fetchResult, nowTs, segment = 'UNKN
   return {
     state: { ...state, daily, anomaly_buf: anomalyBuf },
     notifications,
+    configPatch, // 触碰阈值后要写回配置的变更，没有触碰就是 null
   };
 }

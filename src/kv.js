@@ -7,8 +7,8 @@ import { KV, DEFAULT_CONFIG } from './config.js';
 //     trade_date:        string,   // trading date (resets at market open: 05:00 CST summer / 06:00 CST winter)
 //     high:              number,   // session high USD/KRW
 //     low:               number,   // session low  USD/KRW
-//     th_high_triggered: boolean,  // condition4 high threshold hit today
-//     th_low_triggered:  boolean,  // condition4 low  threshold hit today
+//     th_high_points:    Array<{ts, rate}>,  // 当天所有高位阈值突破点（不限次数）
+//     th_low_points:     Array<{ts, rate}>,  // 当天所有低位阈值突破点
 //     c3_high_ts:        number|null,  // last condition3 high trigger timestamp
 //     c3_low_ts:         number|null,  // last condition3 low  trigger timestamp
 //     last_broadcast_ts: number|null,  // last condition1 broadcast timestamp
@@ -40,14 +40,12 @@ function emptyState(tradeDate, rate) {
       trade_date:        tradeDate,
       high:              rate,
       low:               rate,
-      th_high_triggered: false,
-      th_low_triggered:  false,
       c3_high_ts:        null,
       c3_low_ts:         null,
       last_broadcast_ts: null,
       anomaly_points:    [],
-      th_high_ts:        null,
-      th_low_ts:         null,
+      th_high_points:    [],  // 当天所有高位阈值突破点，供图表标记（不限一次）
+      th_low_points:     [],  // 当天所有低位阈值突破点
     },
     anomaly_buf: [],
     latest:      null,
