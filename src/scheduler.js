@@ -38,7 +38,8 @@ function getSegment(ts) {
  * Returns true if we should actually fetch data this cron tick.
  * Uses epoch-minute modulo to distribute fetches evenly.
  */
-function shouldFetch(segment, config) {
+function shouldFetch(segment, config, nowTs) {
+  if (!config) return false; // INACTIVE — config wasn't even loaded
   const intervals = {
     HIGH: config.interval_high,
     MID:  config.interval_mid,
@@ -47,7 +48,7 @@ function shouldFetch(segment, config) {
   const interval = intervals[segment];
   if (!interval) return false; // INACTIVE
   if (interval === 1) return true;
-  const epochMinute = Math.floor(Date.now() / 60_000);
+  const epochMinute = Math.floor(nowTs / 60_000);
   return epochMinute % interval === 0;
 }
 
@@ -55,36 +56,49 @@ function shouldFetch(segment, config) {
 
 export async function handleCron(env) {
   const nowTs   = Date.now();
-  
-  // ── 互斥锁：防止两个触发源（Cloudflare Cron + 外部 cron-job.org）在同一
-  //    分钟内重复调用，导致重复播报、chart 出现两条数据 ──────────────────
-  const epochMinute = Math.floor(nowTs / 60_000);
-  const lockKey      = `cron_lock:${epochMinute}`;
-  const alreadyRan    = await env.FOREX_KV.get(lockKey);
-  if (alreadyRan) {
-    console.log('[forex-monitor] duplicate trigger skipped for minute', epochMinute);
-    return;
-  }
-  // 2 分钟后自动过期，避免这个 key 无限堆积；不需要精确原子性，
-  // 只是尽量降低两边"撞车"的概率（Cloudflare KV 本身不是强一致，极端情况下
-  // 两个请求几乎同时读到都还没写入的状态，仍有极小概率同时通过，但已经能
-  // 挡掉绝大多数场景）。
-  await env.FOREX_KV.put(lockKey, String(nowTs), { expirationTtl: 120 });
-
   const segment = getSegment(nowTs);
 
-// ── 每日交易日边界：归档前一日数据（先于状态重置）────────────────────────
+  // ── 每日交易日边界窗口：归档前一日数据（先于状态重置）──────────────────
   const _d          = new Date(nowTs + 8 * 3600_000);
   const _cstMin     = _d.getUTCHours() * 60 + _d.getUTCMinutes();
   const _marketOpen = isUSDST(nowTs) ? 300 : 360; // 05:00 或 06:00 CST
+  const inArchiveWindow = _cstMin >= _marketOpen && _cstMin < _marketOpen + 5; // 5 分钟容错窗口
+  const isMarketOpen    = (_cstMin === _marketOpen);
 
-  if (_cstMin >= _marketOpen && _cstMin < _marketOpen + 5) {  // 给 5 分钟容错窗口
+  // Load config early only if we might need it (active segment or archive window)
+  const config = (segment !== 'INACTIVE' || inArchiveWindow)
+    ? await loadConfig(env.FOREX_KV)
+    : null;
+
+  const willFetch = segment !== 'INACTIVE' && shouldFetch(segment, config, nowTs);
+
+  // ── 互斥锁：防止两个触发源（Cloudflare Cron + 外部 cron-job.org）在同一
+  //    分钟内重复调用，导致重复播报、chart 出现两条数据 ──────────────────
+  // 只有这一分钟"确实要做事"（抓取数据 或 处于归档窗口）时才获取锁，
+  // 避免每分钟都无条件写 KV —— Cloudflare 免费版 KV 每天只有 1000 次写入额度，
+  // 若不加这个判断，光是每天 1440 次的锁写入就会先于业务逻辑耗尽额度。
+  if (willFetch || inArchiveWindow) {
+    const epochMinute = Math.floor(nowTs / 60_000);
+    const lockKey      = `cron_lock:${epochMinute}`;
+    const alreadyRan    = await env.FOREX_KV.get(lockKey);
+    if (alreadyRan) {
+      console.log('[forex-monitor] duplicate trigger skipped for minute', epochMinute);
+      return;
+    }
+    // 2 分钟后自动过期，避免这个 key 无限堆积；不需要精确原子性，
+    // 只是尽量降低两边"撞车"的概率（Cloudflare KV 本身不是强一致，极端情况下
+    // 两个请求几乎同时读到都还没写入的状态，仍有极小概率同时通过，但已经能
+    // 挡掉绝大多数场景）。
+    await env.FOREX_KV.put(lockKey, String(nowTs), { expirationTtl: 120 });
+  }
+
+  if (inArchiveWindow) {
     const prevState = await loadState(env.FOREX_KV);
     const todayDate  = tradingDate(nowTs);
     if (prevState?.chart?.length && prevState.daily.trade_date
         && prevState.daily.trade_date !== todayDate   // 必须确实是"前一天"，不能是今天自己
         && !prevState.daily.archived) {   // 避免窗口内重复归档
-      const prevConfig = await loadConfig(env.FOREX_KV);
+      const prevConfig = config ?? await loadConfig(env.FOREX_KV);
       await sendClosingSummary(env, nowTs, prevState);
       await archiveDay(env, prevState.daily.trade_date, prevState, prevConfig);
       prevState.daily.archived = true;
@@ -92,13 +106,7 @@ export async function handleCron(env) {
     }
   }
 
-  const isMarketOpen = (_cstMin === _marketOpen);
-  if (segment === 'INACTIVE') return;
-
-  // Load config first to check fetch interval
-  const config = await loadConfig(env.FOREX_KV);
-
-  if (!shouldFetch(segment, config)) return;
+  if (!willFetch) return;
 
   // ── Load state ──────────────────────────────────────────────────────────────
   const rawState = await loadState(env.FOREX_KV);
