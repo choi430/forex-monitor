@@ -1,8 +1,9 @@
 import { getAdminHtml } from './admin.js';
-import { handleCron }         from './scheduler.js';
+import { handleCron, getSegment } from './scheduler.js';
 import { handleCommand, sendCard } from './feishu.js';
 import { loadState, loadConfig, saveConfig, loadHistory, listHistoryDates } from './kv.js';
 import { getPWAHtml }              from './pwa.js';
+import { getSessionInfo }          from './config.js';
 
 export default {
 
@@ -45,6 +46,7 @@ export default {
         return Response.json({ error: 'no data yet' }, { status: 503 });
       }
       const config = await loadConfig(env.FOREX_KV);
+      const nowTs  = Date.now();
       return Response.json(
         {
           latest:     state.latest,
@@ -55,6 +57,7 @@ export default {
             low:  config.threshold_low,
           },
           us_session_start: config.us_session_start ?? 20,
+          session: { segment: getSegment(nowTs), ...getSessionInfo(nowTs) },
         },
         { headers: { 'Cache-Control': 'no-store' } },
       );
@@ -112,7 +115,13 @@ export default {
       if (!date) return Response.json({ error: 'date required' }, { status: 400 });
       const data = await loadHistory(env.FOREX_KV, date);
       if (!data) return Response.json({ error: 'not found' }, { status: 404 });
-      return Response.json(data, { headers: { 'Cache-Control': 'no-store' } });
+      // chart 是倒序（最新在前），最后一个元素是当天最早的数据点，
+      // 用它作为参考时间戳算这一天的 DST/开收盘时段，而不是用现在的时间
+      const refTs = data.chart?.length ? data.chart[data.chart.length - 1].ts : Date.now();
+      return Response.json(
+        { ...data, session: getSessionInfo(refTs) },
+        { headers: { 'Cache-Control': 'no-store' } },
+      );
     }
 
     return new Response('Not Found', { status: 404 });

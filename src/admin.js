@@ -114,12 +114,12 @@ export function getAdminHtml() {
   <div class="card">
     <div class="row">
       <div><div class="label">高位阈值</div>
-           <div class="hint">汇率高于此值触发，留空表示不设置</div></div>
+           <div class="hint">汇率高于此值触发，留空表示不设置。触发后会自动上调 +5，避免同一价位反复推送</div></div>
       <input type="number" id="threshold_high" step="0.1" placeholder="不设置">
     </div>
     <div class="row">
       <div><div class="label">低位阈值</div>
-           <div class="hint">汇率低于此值触发，留空表示不设置</div></div>
+           <div class="hint">汇率低于此值触发，留空表示不设置。触发后会自动下调 -5，避免同一价位反复推送</div></div>
       <input type="number" id="threshold_low" step="0.1" placeholder="不设置">
     </div>
   </div>

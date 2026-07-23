@@ -25,7 +25,7 @@ function isInTradingWindow(ts) {
   return true;
 }
 
-function getSegment(ts) {
+export function getSegment(ts) {
   if (!isInTradingWindow(ts)) return 'INACTIVE';
   const mins = toCSTMinutes(ts);
   for (const seg of TIME_SEGMENTS) {
@@ -92,8 +92,14 @@ export async function handleCron(env) {
     await env.FOREX_KV.put(lockKey, String(nowTs), { expirationTtl: 120 });
   }
 
+  // 归档窗口和主流程都需要读一次 state；如果两者恰好在同一分钟内都要执行
+  // （开盘后 5 分钟容错窗口内又正好命中 fetch 节奏），复用同一份读取结果，
+  // 避免对同一个 key 读两次 KV。
+  let archiveWindowState = null;
+
   if (inArchiveWindow) {
-    const prevState = await loadState(env.FOREX_KV);
+    archiveWindowState = await loadState(env.FOREX_KV);
+    const prevState  = archiveWindowState;
     const todayDate  = tradingDate(nowTs);
     if (prevState?.chart?.length && prevState.daily.trade_date
         && prevState.daily.trade_date !== todayDate   // 必须确实是"前一天"，不能是今天自己
@@ -103,13 +109,15 @@ export async function handleCron(env) {
       await archiveDay(env, prevState.daily.trade_date, prevState, prevConfig);
       prevState.daily.archived = true;
       await saveState(env.FOREX_KV, prevState);
+      // archiveWindowState 已经落后于刚保存的版本（多了 archived 标记），
+      // 主流程需要的是这份最新状态，直接复用，无需重新读 KV
     }
   }
 
   if (!willFetch) return;
 
   // ── Load state ──────────────────────────────────────────────────────────────
-  const rawState = await loadState(env.FOREX_KV);
+  const rawState = archiveWindowState ?? await loadState(env.FOREX_KV);
 
   // ── Fetch data ──────────────────────────────────────────────────────────────
   const cached      = rawState?.latest ?? null;

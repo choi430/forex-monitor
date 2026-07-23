@@ -124,9 +124,7 @@ export function isUSDST(ts) {
 /**
  * 指数交易时段的开盘/收盘时间戳（refTs 所在那一天，CST）。
  * key: 'kospi' | 'nasdaq' | 'sp500'
- * 跟 pwa.js 前端那份 getMarketSessionTs 逻辑保持一致（那份跑在浏览器里，这份跑在 Worker 里，
- * 运行环境不同没法直接共享代码，只能各写一份，但要保证逻辑同步）。
- */
+ **/
 export function getMarketSessionTs(key, refTs) {
   const isDST  = isUSDST(refTs);
   const cstRef = new Date(refTs + 8 * 3600_000);
@@ -145,5 +143,28 @@ export function getMarketSessionTs(key, refTs) {
   return {
     open:  midUtc + openH  * 3600_000,
     close: midUtc + closeH * 3600_000,
+  };
+}
+
+/**
+ * 一次性打包 refTs 所在交易日的全部 DST/时段信息，供 API 直接下发给前端。
+ *
+ * 这是 isUSDST / getMarketSessionTs 相关计算的唯一权威来源：pwa.js（浏览器端）
+ * 不再自行复刻这套 DST 与开收盘时间的计算逻辑，而是通过 /api/data、/api/history
+ * 拿到这里算好的结果直接使用，避免两份独立实现随时间推移出现逻辑漂移的风险。
+ */
+export function getSessionInfo(refTs) {
+  const isDST   = isUSDST(refTs);
+  const openMin = isDST ? 300 : 360; // 05:00 或 06:00 CST（分钟数）
+  const cstRef  = new Date(refTs + 8 * 3600_000);
+  const y = cstRef.getUTCFullYear(), mo = cstRef.getUTCMonth(), d = cstRef.getUTCDate();
+  const midUtc  = Date.UTC(y, mo, d) - 8 * 3600_000; // 当天 00:00 CST 对应的 UTC 时间戳
+
+  return {
+    isUSDST:      isDST,
+    marketOpenTs: midUtc + openMin * 60_000,
+    kospi:        getMarketSessionTs('kospi',  refTs),
+    nasdaq:       getMarketSessionTs('nasdaq', refTs),
+    sp500:        getMarketSessionTs('sp500',  refTs),
   };
 }

@@ -251,49 +251,6 @@ function cstLabel(ts) {
        + ':' + String(d.getUTCMinutes()).padStart(2,'0');
 }
 
-function isUSDSTBrowser(refTs = Date.now()) {
-  const d    = new Date(refTs);
-  const year = d.getUTCFullYear();
-  const mar1 = new Date(Date.UTC(year, 2, 1));
-  const dstS = new Date(Date.UTC(year, 2, 1 + (7 - mar1.getUTCDay()) % 7 + 7, 7));
-  const nov1 = new Date(Date.UTC(year, 10, 1));
-  const dstE = new Date(Date.UTC(year, 10, 1 + (7 - nov1.getUTCDay()) % 7, 6));
-  return refTs >= dstS.getTime() && refTs < dstE.getTime();
-}
-
-// 指定日期（refTs 所在的 CST 日历日）的开盘时间戳（夏令时 5:00 CST / 冬令时 6:00 CST）。
-// refTs 默认取当前时间，但查看历史数据时必须传入该天的实际时间戳，
-// 否则历史数据全部早于"今天"的开盘时间，会被 x 轴 min 裁掉导致折线消失。
-function marketOpenTs(refTs = Date.now()) {
-  const isDST    = isUSDSTBrowser(refTs);
-  const openMin  = isDST ? 300 : 360; // 分钟数：5:00 或 6:00
-  const cstRef   = new Date(refTs + 8 * 3600_000);
-  const y = cstRef.getUTCFullYear(), m = cstRef.getUTCMonth(), d = cstRef.getUTCDate();
-  const midnightCstInUtcMs = Date.UTC(y, m, d) - 8 * 3600_000; // 当天 00:00 CST 对应的 UTC 时间戳
-  return midnightCstInUtcMs + openMin * 60_000;
-}
-
-function getMarketSessionTs(key, refTs) {
-  const isDST  = isUSDSTBrowser(refTs);
-  const cstRef = new Date(refTs + 8 * 3600_000);
-  const y = cstRef.getUTCFullYear(), mo = cstRef.getUTCMonth(), d = cstRef.getUTCDate();
-  const midUtc = Date.UTC(y, mo, d) - 8 * 3600_000; // 当天 00:00 CST 对应的 UTC 时间戳
-
-  if (key === 'kospi') {
-    return {
-      open:  midUtc + 8    * 3600_000,  // 08:00 CST
-      close: midUtc + 14.5 * 3600_000,  // 14:30 CST
-    };
-  }
-  // NASDAQ / S&P 500
-  const openH  = isDST ? 21.5 : 22.5;  // EDT 21:30 / EST 22:30 CST
-  const closeH = isDST ? 28   : 29;    // EDT 04:00 次日 / EST 05:00 次日 CST
-  return {
-    open:  midUtc + openH  * 3600_000,
-    close: midUtc + closeH * 3600_000,
-  };
-}
-
 // 参考线右端点：如果最后一条数据就是"今天"（实时数据），延伸到当前时间；
 // 如果是历史数据（最后一条数据不是今天），就用当天最后一条数据的时间作为右边界，
 function chartRightBound(sorted, isHistorical) {
@@ -302,32 +259,13 @@ function chartRightBound(sorted, isHistorical) {
   return isHistorical ? last : Math.max(last, Date.now());
 }
 
-function currentSegment() {
-  const now     = new Date();
-  const cstH    = (now.getUTCHours() + 8) % 24;
-  const cstM    = cstH * 60 + now.getUTCMinutes();
-  const dow     = new Date(Date.now() + 8 * 3600_000).getUTCDay();
-  const isDST   = isUSDSTBrowser();
-  const openMin = isDST ? 300 : 360;
-
-  if (dow === 0) return '休市中';
-  if (dow === 6 && cstM >= openMin) return '休市中';
-  if (dow === 1 && cstM < openMin) return '休市中';
-
-  const ext  = cstM < 240 ? cstM + 1440 : cstM;
-  const segs = [
-    [240,  420,  '低频时段'],  // 新增：04:00–07:00
-    [420,  450,  '中频时段'],
-    [450,  540,  '高频时段'],
-    [540,  810,  '中频时段'],
-    [810,  930,  '高频时段'],
-    [930,  1200, '低频时段'],
-    [1200, 1350, '高频时段'],
-    [1350, 1470, '中频时段'],
-    [1470, 1680, '低频时段'],
-  ];
-  const s = segs.find(([a, b]) => ext >= a && ext < b);
-  return s ? s[2] : '低频时段';
+// segment 字符串本身由后端 getSegment() 算出（跟 scheduler.js 的抓取节奏共用同一份逻辑），
+// 这里只是把 key 映射成中文展示文案，不涉及任何时段/DST 计算。
+const SEGMENT_LABELS = {
+  HIGH: '高频时段', MID: '中频时段', LOW: '低频时段', INACTIVE: '休市中',
+};
+function segmentLabel(segment) {
+  return SEGMENT_LABELS[segment] ?? '低频时段';
 }
 
 function computeCR(sorted, key) {
@@ -346,14 +284,14 @@ let mainChart = null;
 const idxCharts = {};
 
 // ── Chart options factory ─────────────────────────────────────────────────────
-function chartOptions(ttId, ttTimeId, ttValId, ttCrId, ttDelayId, canvas, valFmt, crArr, points, maxX, session, localTz) {
+function chartOptions(ttId, ttTimeId, ttValId, ttCrId, ttDelayId, canvas, valFmt, crArr, points, maxX, session, localTz, marketOpen) {
   return {
     responsive: true, maintainAspectRatio: false, animation: false,
     plugins: { legend:{ display:false }, tooltip:{ enabled:false } },
     scales: {
       x: {
         type: 'linear',
-        min: marketOpenTs(points[0]?.x),
+        min: marketOpen,
         max: maxX ?? points[points.length - 1]?.x,
         bounds: 'data', // 禁止 Chart.js 为了凑"整齐刻度"把轴往外扩到超出真实数据范围
         grid: { color: GRID },
@@ -423,7 +361,7 @@ function chartOptions(ttId, ttTimeId, ttValId, ttCrId, ttDelayId, canvas, valFmt
 }
 
 // ── Make main chart ───────────────────────────────────────────────────────────
-function makeMainChart(crArr, sorted, daily, thresholds, isHistorical) {
+function makeMainChart(crArr, sorted, daily, thresholds, isHistorical, marketOpen) {
   const ctx = document.getElementById('main-chart');
   if (mainChart) mainChart.destroy();
 
@@ -432,7 +370,7 @@ function makeMainChart(crArr, sorted, daily, thresholds, isHistorical) {
   const overlays = [];
 
   const rightBound = chartRightBound(sorted, isHistorical);
-  const tsRange = (v) => [{ x: marketOpenTs(sorted[0]?.ts), y: v }, { x: rightBound, y: v }];
+  const tsRange = (v) => [{ x: marketOpen, y: v }, { x: rightBound, y: v }];
 
   // 条件3：日内高低线（虚线）
   if (daily?.high != null) overlays.push({
@@ -518,12 +456,12 @@ function makeMainChart(crArr, sorted, daily, thresholds, isHistorical) {
       ],
     },
     options: chartOptions('tt','tt-time','tt-val','tt-cr','tt-delay', ctx,
-      v => fmt(v,2), crArr, xyData, rightBound),
+      v => fmt(v,2), crArr, xyData, rightBound, undefined, undefined, marketOpen),
   });
 }
 
 // ── Make index chart ──────────────────────────────────────────────────────────
-function makeIdxChart(key, xyData, crArr, color, session = null, staleData = [], localTz = null) {
+function makeIdxChart(key, xyData, crArr, color, session = null, staleData = [], localTz = null, marketOpen) {
   const ctx = document.getElementById('c-'+key);
   if (idxCharts[key]) idxCharts[key].destroy();
 
@@ -575,7 +513,7 @@ function makeIdxChart(key, xyData, crArr, color, session = null, staleData = [],
     },
     options: chartOptions(
       'tt-'+key, 'tt-'+key+'-time', 'tt-'+key+'-val', 'tt-'+key+'-cr', 'tt-'+key+'-delay',
-      ctx, v => fmt(v,1), crArr, xyData, undefined, session, localTz
+      ctx, v => fmt(v,1), crArr, xyData, undefined, session, localTz, marketOpen
     ),
     plugins: [vlinePlugin],
   });
@@ -583,7 +521,7 @@ function makeIdxChart(key, xyData, crArr, color, session = null, staleData = [],
 
 // ── Render ────────────────────────────────────────────────────────────────────
 function render(d, isHistorical = false) {
-  const { latest, daily, chart, thresholds } = d;
+  const { latest, daily, chart, thresholds, session } = d;
 
   // Header
   if (isHistorical) {
@@ -592,7 +530,7 @@ function render(d, isHistorical = false) {
     document.getElementById('dot-live').classList.add('paused');
   } else {
     document.getElementById('upd-time').textContent  = cstLabel(latest.ts) + ' CST';
-    document.getElementById('cur-segment').textContent = currentSegment();
+    document.getElementById('cur-segment').textContent = segmentLabel(session?.segment);
     document.getElementById('dot-live').classList.remove('paused');
   }
 
@@ -623,7 +561,7 @@ function render(d, isHistorical = false) {
   const sorted = [...chart].reverse();
 
   // Main chart
-  makeMainChart(computeCR(sorted,'r'), sorted, daily, thresholds, isHistorical);
+  makeMainChart(computeCR(sorted,'r'), sorted, daily, thresholds, isHistorical, session?.marketOpenTs);
 
   // Index cards
   const indices = [
@@ -660,14 +598,14 @@ function render(d, isHistorical = false) {
       x: p.ts, y: p[idx.field] ?? null,
       dataTs: p[tsField] ?? null, stale: !!p[staleField],
     }));
-    const session = getMarketSessionTs(idx.key, sorted[0]?.ts ?? Date.now());
+    const idxSession = session?.[idx.key] ?? null;
     const staleData = sorted.filter(p => p[staleField]).map(p => ({ x: p.ts, y: p[idx.field] }));
-        const localTz = idx.key === 'kospi'
+    const localTz = idx.key === 'kospi'
       ? { offsetMs: 9 * 3600_000, abbr: 'KST' }  // 韩国时间，无夏令时
-      : (isUSDSTBrowser(sorted[0]?.ts ?? Date.now())
+      : (session?.isUSDST
           ? { offsetMs: -4 * 3600_000, abbr: 'EDT' }  // 美东夏令时
           : { offsetMs: -5 * 3600_000, abbr: 'EST' }); // 美东冬令时
-    makeIdxChart(idx.key, xyData, computeCR(sorted, idx.field), color, session, staleData, localTz);
+    makeIdxChart(idx.key, xyData, computeCR(sorted, idx.field), color, idxSession, staleData, localTz, session?.marketOpenTs);
   }
 
   // Index order: US session after 20:00 CST → NASDAQ, S&P, KOSPI
@@ -787,7 +725,6 @@ async function refresh() {
   } catch(e) {
     document.getElementById('upd-time').textContent = '加载失败：' + e.message;
   }
-  document.getElementById('cur-segment').textContent = currentSegment();
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
