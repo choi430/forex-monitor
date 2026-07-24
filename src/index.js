@@ -1,6 +1,5 @@
 import { getAdminHtml } from './admin.js';
 import { handleCron, getSegment } from './scheduler.js';
-import { handleCommand, sendCard } from './feishu.js';
 import { loadState, loadConfig, saveConfig, loadHistory, listHistoryDates } from './kv.js';
 import { getPWAHtml }              from './pwa.js';
 import { getSessionInfo }          from './config.js';
@@ -72,11 +71,6 @@ export default {
       return new Response('OK');
     }
 
-    // ── Feishu Event Webhook ─────────────────────────────────────────────────
-    if (pathname === '/feishu/webhook' && request.method === 'POST') {
-      return handleFeishuWebhook(request, env, ctx);
-    }
-
     // ── Admin 设置页面 ────────────────────────────────────────────────────────
     if (pathname === '/admin') {
       return new Response(getAdminHtml(), {
@@ -127,70 +121,3 @@ export default {
     return new Response('Not Found', { status: 404 });
   },
 };
-
-// ─── Feishu Webhook Handler ───────────────────────────────────────────────────
-
-async function handleFeishuWebhook(request, env, ctx) {
-  let body;
-  try {
-    body = await request.json();
-  } catch {
-    return new Response('Bad Request', { status: 400 });
-  }
-
-  // 1. URL verification challenge (Feishu sends this when first configuring the callback)
-  if (body.type === 'url_verification') {
-    if (body.token !== env.FEISHU_VERIFY_TOKEN) {
-      return new Response('Forbidden', { status: 403 });
-    }
-    return Response.json({ challenge: body.challenge });
-  }
-
-  // 2. Verify event token
-  const token = body?.header?.token ?? body?.token;
-  if (token !== env.FEISHU_VERIFY_TOKEN) {
-    return new Response('Forbidden', { status: 403 });
-  }
-
-  // 3. Only handle message receive events
-  const eventType = body?.header?.event_type;
-  if (eventType !== 'im.message.receive_v1') {
-    return new Response('OK');
-  }
-
-  // 4. Ignore messages not in our monitored chat (safety check)
-  const chatId = body?.event?.message?.chat_id;
-  if (chatId && chatId !== env.FEISHU_CHAT_ID) {
-    return new Response('OK');
-  }
-
-  // 5. Extract text content
-  const msgType = body?.event?.message?.msg_type;
-  if (msgType !== 'text') return new Response('OK');
-
-  let text = '';
-  try {
-    const content = JSON.parse(body.event.message.content);
-    text = content.text?.trim() ?? '';
-    // Strip @mentions (Feishu includes them in the text)
-    text = text.replace(/@\S+/g, '').trim();
-  } catch {
-    return new Response('OK');
-  }
-
-  if (!text.startsWith('/')) return new Response('OK'); // not a command
-
-  // 6. Handle command asynchronously (don't block the response to Feishu)
-  ctx.waitUntil(
-    (async () => {
-      try {
-        const replyCard = await handleCommand(env, text);
-        if (replyCard) await sendCard(env, replyCard);
-      } catch (e) {
-        console.error('[forex-monitor] command handler error:', e);
-      }
-    })(),
-  );
-
-  return new Response('OK');
-}
