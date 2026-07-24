@@ -1,4 +1,4 @@
-import { KV, DEFAULT_CONFIG } from './config.js';
+import { KV, DEFAULT_CONFIG, isUSDST } from './config.js';
 
 // ─── State Schema ────────────────────────────────────────────────────────────
 //
@@ -140,7 +140,7 @@ export async function listHistoryDates(kv) {
   // 算出当前交易日期，历史列表只返回严格早于今天的日期
   const nowTs   = Date.now();
   const cstDate = new Date(nowTs + 8 * 3600_000);
-  const sessionStart = cstDate.getUTCHours() < 5 ? 5 : 5;
+  const sessionStart = isUSDST(nowTs) ? 5 : 6;
   if (cstDate.getUTCHours() < sessionStart) {
     cstDate.setUTCDate(cstDate.getUTCDate() - 1);
   }
