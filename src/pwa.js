@@ -54,8 +54,25 @@ export function getPWAHtml() {
     margin:12px 12px 6px; background:var(--card);
     border:1px solid var(--border); border-radius:14px; padding:16px;
   }
+  .main-card-head { display:flex; justify-content:space-between; align-items:center; }
   .main-label { font-size:11px; color:var(--muted); letter-spacing:.06em;
                 text-transform:uppercase; margin-bottom:4px; }
+  .collapse-btn {
+    background:none; border:1px solid var(--border); color:var(--muted);
+    border-radius:6px; width:26px; height:26px; font-size:13px; line-height:1;
+    cursor:pointer; flex-shrink:0; transition:transform .15s;
+  }
+  .collapse-btn.collapsed { transform:rotate(-90deg); }
+  .chart-wrap.hidden { display:none; }
+  .reset-zoom-btn {
+    display:none; position:absolute; left:8px; top:6px; z-index:6;
+    background:rgba(96,165,250,.15); border:1px solid var(--accent); color:var(--accent);
+    font-size:10px; padding:3px 8px; border-radius:6px; cursor:pointer;
+  }
+  .reset-zoom-btn.show { display:block; }
+  .zoom-hint {
+    font-size:10px; color:var(--muted); text-align:center; margin-top:4px;
+  }
   .main-price { font-size:36px; font-weight:700; letter-spacing:-.5px; line-height:1; }
   .badges { display:flex; gap:8px; margin-top:8px; flex-wrap:wrap; }
   .badge { font-size:12px; font-weight:600; padding:3px 9px; border-radius:6px; }
@@ -93,7 +110,8 @@ export function getPWAHtml() {
     margin:0 12px 10px; background:var(--card);
     border:1px solid var(--border); border-radius:12px; padding:14px;
   }
-  .idx-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:4px; }
+  .idx-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:4px; gap:8px; }
+  .idx-right  { display:flex; align-items:center; gap:8px; flex-shrink:0; }
   .idx-left   { display:flex; align-items:baseline; gap:10px; }
   .idx-name   { font-size:11px; color:var(--muted); text-transform:uppercase;
                 letter-spacing:.06em; margin-right:4px; }
@@ -132,7 +150,10 @@ export function getPWAHtml() {
 <div class="err-banner" id="err-banner"></div>
 
 <div class="main-card">
-  <div class="main-label">USD / KRW</div>
+  <div class="main-card-head">
+    <div class="main-label">USD / KRW</div>
+    <button class="collapse-btn" id="collapse-main" onclick="toggleCollapse('main')" aria-label="收起/展开图表">⌄</button>
+  </div>
   <div class="main-price" id="main-price">—</div>
   <div class="badges">
     <span class="badge neu" id="badge-day">较上日 —</span>
@@ -146,8 +167,9 @@ export function getPWAHtml() {
     </div>
     <span id="range-high">—</span>
   </div>
-  <div class="chart-wrap" style="height:240px">
+  <div class="chart-wrap" id="wrap-main" style="height:240px">
     <canvas id="main-chart" role="img" aria-label="USD/KRW日内走势"></canvas>
+    <button class="reset-zoom-btn" id="reset-main" onclick="resetZoom('main')">↺ 重置缩放</button>
     <div class="delay-label" id="delay-main"></div>
     <div class="tooltip-box" id="tt">
       <div class="tt-time" id="tt-time">—</div>
@@ -156,6 +178,7 @@ export function getPWAHtml() {
       <div class="tt-row"><span class="tt-label">延迟</span><span class="tt-val" id="tt-delay">—</span></div>
     </div>
   </div>
+  <div class="zoom-hint" id="zoom-hint-main">双指或滚轮缩放 · 拖动平移 · 双击重置</div>
 </div>
 
 <div class="section-label">主要指数</div>
@@ -167,10 +190,14 @@ export function getPWAHtml() {
         <span class="idx-val" id="kospi-val">—</span>
         <span class="idx-chg" id="kospi-chg">—</span>
       </div>
-      <div class="idx-hl" id="kospi-hl">—</div>
+      <div class="idx-right">
+        <div class="idx-hl" id="kospi-hl">—</div>
+        <button class="collapse-btn" id="collapse-kospi" onclick="toggleCollapse('kospi')" aria-label="收起/展开图表">⌄</button>
+      </div>
     </div>
-    <div class="chart-wrap" style="height:240px">
+    <div class="chart-wrap" id="wrap-kospi" style="height:240px">
       <canvas id="c-kospi" role="img" aria-label="KOSPI走势"></canvas>
+      <button class="reset-zoom-btn" id="reset-kospi" onclick="resetZoom('kospi')">↺ 重置缩放</button>
       <div class="delay-label" id="delay-kospi"></div>
       <div class="tooltip-box" id="tt-kospi">
         <div class="tt-time" id="tt-kospi-time">—</div>
@@ -187,10 +214,14 @@ export function getPWAHtml() {
         <span class="idx-val" id="nasdaq-val">—</span>
         <span class="idx-chg" id="nasdaq-chg">—</span>
       </div>
-      <div class="idx-hl" id="nasdaq-hl">—</div>
+      <div class="idx-right">
+        <div class="idx-hl" id="nasdaq-hl">—</div>
+        <button class="collapse-btn" id="collapse-nasdaq" onclick="toggleCollapse('nasdaq')" aria-label="收起/展开图表">⌄</button>
+      </div>
     </div>
-    <div class="chart-wrap" style="height:240px">
+    <div class="chart-wrap" id="wrap-nasdaq" style="height:240px">
       <canvas id="c-nasdaq" role="img" aria-label="NASDAQ走势"></canvas>
+      <button class="reset-zoom-btn" id="reset-nasdaq" onclick="resetZoom('nasdaq')">↺ 重置缩放</button>
       <div class="delay-label" id="delay-nasdaq"></div>
       <div class="tooltip-box" id="tt-nasdaq">
         <div class="tt-time" id="tt-nasdaq-time">—</div>
@@ -207,10 +238,14 @@ export function getPWAHtml() {
         <span class="idx-val" id="sp500-val">—</span>
         <span class="idx-chg" id="sp500-chg">—</span>
       </div>
-      <div class="idx-hl" id="sp500-hl">—</div>
+      <div class="idx-right">
+        <div class="idx-hl" id="sp500-hl">—</div>
+        <button class="collapse-btn" id="collapse-sp500" onclick="toggleCollapse('sp500')" aria-label="收起/展开图表">⌄</button>
+      </div>
     </div>
-    <div class="chart-wrap" style="height:240px">
+    <div class="chart-wrap" id="wrap-sp500" style="height:240px">
       <canvas id="c-sp500" role="img" aria-label="S&P 500走势"></canvas>
+      <button class="reset-zoom-btn" id="reset-sp500" onclick="resetZoom('sp500')">↺ 重置缩放</button>
       <div class="delay-label" id="delay-sp500"></div>
       <div class="tooltip-box" id="tt-sp500">
         <div class="tt-time" id="tt-sp500-time">—</div>
@@ -225,6 +260,19 @@ export function getPWAHtml() {
 <div class="footer">Forex Monitor · Powered by Cloudflare Workers</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/hammer.js/2.0.8/hammer.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-zoom/2.0.1/chartjs-plugin-zoom.min.js"></script>
+<script>
+  // UMD 全局变量名在不同打包版本里不完全一致，逐个尝试，找到就注册
+  (function registerZoomPlugin() {
+    const candidate = window.ChartZoom || window['chartjs-plugin-zoom'] || window.chartjsPluginZoom;
+    if (candidate && window.Chart) {
+      window.Chart.register(candidate);
+    } else {
+      console.warn('[forex-monitor] chartjs-plugin-zoom 未能注册，缩放/平移功能将不可用');
+    }
+  })();
+</script>
 <script>
 // ── Constants ────────────────────────────────────────────────────────────────
 const UP = '#f87171', DOWN = '#34d399', ACCENT = '#60a5fa', GRID = '#333';
@@ -283,16 +331,136 @@ function computeCR(sorted, key) {
 let mainChart = null;
 const idxCharts = {};
 
+// ── Zoom/pan state ─────────────────────────────────────────────────────────
+// 记录每个图表当前的自定义可视区间（用户手动缩放/平移后写入）。
+// 为 null 表示"未缩放，跟随最新数据的完整区间"。跨每分钟刷新持久化，
+// 这样用户放大观察某段时间后，下一次刷新不会把视图弹回全览。
+const zoomRanges = { main: null, kospi: null, nasdaq: null, sp500: null };
+// 每个图表当前渲染用的数据点数组（供缩放后"吸附"到真实数据点，避免 y 轴和第一个点之间出现空白）
+const chartPoints = { main: null, kospi: null, nasdaq: null, sp500: null };
+
+/** 在已按 x 升序排列的 points 里，找到 <= target 的最后一个点的 x；找不到就用第一个点的 x */
+function snapMinToData(target, points) {
+  if (!points || !points.length) return target;
+  let lo = 0, hi = points.length - 1, ans = points[0].x;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (points[mid].x <= target) { ans = points[mid].x; lo = mid + 1; } else { hi = mid - 1; }
+  }
+  return ans;
+}
+
+function onZoomOrPan(key, chart, naturalMin, naturalMax) {
+  const xs = chart.scales.x;
+  let min = xs.min, max = xs.max;
+  const zoomed = min > naturalMin + 1000 || max < naturalMax - 1000;
+  if (zoomed) {
+    // 缩放/平移后可能停在两个数据点之间，导致最左侧数据点和 y 轴之间露出一截空白。
+    // 把 min 吸附到 <= min 的那个真实数据点上，让第一个点正好贴在 y 轴上。
+    const snapped = snapMinToData(min, chartPoints[key]);
+    if (snapped !== min) {
+      min = snapped;
+      chart.options.scales.x.min = min;
+      chart.update('none');
+    }
+  }
+  zoomRanges[key] = zoomed ? { min, max } : null;
+  showResetBtn(key, zoomed);
+}
+
+function showResetBtn(key, show) {
+  const btn = document.getElementById('reset-' + key);
+  if (btn) btn.classList.toggle('show', show);
+}
+
+function resetZoom(key) {
+  zoomRanges[key] = null;
+  showResetBtn(key, false);
+  const chart = key === 'main' ? mainChart : idxCharts[key];
+  if (!chart) return;
+  // chart.resetZoom() 会回到"图表创建时的初始状态"，但我们为了让缩放跨刷新保持，
+  // 创建时就是把上次的缩放区间当成初始状态传进去的 —— 所以不能用它，
+  // 否则"重置"等于回到刚才那个缩放状态，看起来毫无反应。
+  // limits.x.min/max 才是真正一直没变过的完整数据区间，重置就用这个。
+  const limits = chart.options.plugins?.zoom?.limits?.x;
+  if (limits) {
+    chart.options.scales.x.min = limits.min;
+    chart.options.scales.x.max = limits.max;
+    chart.update('none');
+  } else {
+    chart.resetZoom();
+  }
+}
+
+function resetAllZoomRanges() {
+  ['main', 'kospi', 'nasdaq', 'sp500'].forEach(k => {
+    zoomRanges[k] = null;
+    showResetBtn(k, false);
+  });
+}
+
+// ── Collapse/expand chart panels ──────────────────────────────────────────
+// 折叠状态存 localStorage，跨会话记住用户偏好（这是真实部署到浏览器的页面，
+// 不是 Claude Artifact 沙箱，localStorage 可以正常用）。
+function toggleCollapse(key) {
+  const wrap = document.getElementById('wrap-' + key);
+  const btn  = document.getElementById('collapse-' + key);
+  const collapsed = wrap.classList.toggle('hidden');
+  btn.classList.toggle('collapsed', collapsed);
+  btn.textContent = collapsed ? '›' : '⌄';
+  try { localStorage.setItem('chart-collapsed:' + key, collapsed ? '1' : '0'); } catch {}
+  if (!collapsed) {
+    // 图表在隐藏（display:none）状态下创建/更新时尺寸会是 0，
+    // 展开后需要手动 resize 一次才能正确显示
+    const chart = key === 'main' ? mainChart : idxCharts[key];
+    if (chart) requestAnimationFrame(() => chart.resize());
+  }
+}
+
+function restoreCollapseState() {
+  ['main', 'kospi', 'nasdaq', 'sp500'].forEach(key => {
+    let collapsed = false;
+    try { collapsed = localStorage.getItem('chart-collapsed:' + key) === '1'; } catch {}
+    if (!collapsed) return;
+    document.getElementById('wrap-' + key)?.classList.add('hidden');
+    const btn = document.getElementById('collapse-' + key);
+    if (btn) { btn.classList.add('collapsed'); btn.textContent = '›'; }
+  });
+}
+
 // ── Chart options factory ─────────────────────────────────────────────────────
-function chartOptions(ttId, ttTimeId, ttValId, ttCrId, ttDelayId, canvas, valFmt, crArr, points, maxX, session, localTz, marketOpen) {
+function chartOptions(ttId, ttTimeId, ttValId, ttCrId, ttDelayId, canvas, valFmt, crArr, points, maxX, session, localTz, marketOpen, chartKey) {
+  // marketOpen 是理论开盘时间；如果实际数据比这晚才开始（比如当天刚部署、
+  // 刚开始记录），axis 起点应该跟着真实数据走，而不是画一大截没有数据的空白。
+  const naturalMin = points.length ? Math.max(marketOpen, points[0].x) : marketOpen;
+  const naturalMax = maxX ?? points[points.length - 1]?.x;
+  const zr = chartKey ? zoomRanges[chartKey] : null;
+  if (chartKey) chartPoints[chartKey] = points;
+
   return {
     responsive: true, maintainAspectRatio: false, animation: false,
-    plugins: { legend:{ display:false }, tooltip:{ enabled:false } },
+    plugins: {
+      legend:{ display:false }, tooltip:{ enabled:false },
+      // chartKey 为空（暂不会发生，但保留兜底）时不启用缩放，避免报错
+      zoom: chartKey ? {
+        limits: { x: { min: naturalMin, max: naturalMax } }, // 不能缩小/平移到真实数据范围以外
+        pan: {
+          enabled: true, mode: 'x',
+          onPanComplete: ({ chart }) => onZoomOrPan(chartKey, chart, naturalMin, naturalMax),
+        },
+        zoom: {
+          wheel: { enabled: true },
+          pinch: { enabled: true },
+          mode: 'x',
+          onZoomComplete: ({ chart }) => onZoomOrPan(chartKey, chart, naturalMin, naturalMax),
+        },
+      } : undefined,
+    },
     scales: {
       x: {
         type: 'linear',
-        min: marketOpen,
-        max: maxX ?? points[points.length - 1]?.x,
+        min: zr?.min ?? naturalMin,
+        max: zr?.max ?? naturalMax,
         bounds: 'data', // 禁止 Chart.js 为了凑"整齐刻度"把轴往外扩到超出真实数据范围
         grid: { color: GRID },
         ticks: {
@@ -456,8 +624,10 @@ function makeMainChart(crArr, sorted, daily, thresholds, isHistorical, marketOpe
       ],
     },
     options: chartOptions('tt','tt-time','tt-val','tt-cr','tt-delay', ctx,
-      v => fmt(v,2), crArr, xyData, rightBound, undefined, undefined, marketOpen),
+      v => fmt(v,2), crArr, xyData, rightBound, undefined, undefined, marketOpen, 'main'),
   });
+  ctx.ondblclick = () => resetZoom('main');
+  showResetBtn('main', !!zoomRanges.main);
 }
 
 // ── Make index chart ──────────────────────────────────────────────────────────
@@ -513,10 +683,12 @@ function makeIdxChart(key, xyData, crArr, color, session = null, staleData = [],
     },
     options: chartOptions(
       'tt-'+key, 'tt-'+key+'-time', 'tt-'+key+'-val', 'tt-'+key+'-cr', 'tt-'+key+'-delay',
-      ctx, v => fmt(v,1), crArr, xyData, undefined, session, localTz, marketOpen
+      ctx, v => fmt(v,1), crArr, xyData, undefined, session, localTz, marketOpen, key
     ),
     plugins: [vlinePlugin],
   });
+  ctx.ondblclick = () => resetZoom(key);
+  showResetBtn(key, !!zoomRanges[key]);
 }
 
 // ── Render ────────────────────────────────────────────────────────────────────
@@ -681,6 +853,7 @@ async function viewHistory(date) {
   if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
   viewDate = date;
   updateDateNav();
+  resetAllZoomRanges(); // 切换到别的交易日时，旧的缩放区间没有意义，清掉
 
   try {
     const res = await fetch('/api/history?date=' + date);
@@ -709,6 +882,7 @@ function buildFakeLatest(data) {
 function goLive() {
   viewDate = null;
   updateDateNav();
+  resetAllZoomRanges();
   if (refreshTimer) clearInterval(refreshTimer);
   refresh();
   refreshTimer = setInterval(refresh, 60_000);
@@ -728,6 +902,7 @@ async function refresh() {
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
+restoreCollapseState();
 loadDates();
 refresh();
 refreshTimer = setInterval(refresh, 60_000);
